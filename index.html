@@ -68,11 +68,17 @@
   #recal:hover { color: #fff; border-color: var(--cyan); }
 
   #overlay {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    position: fixed; inset: 0; display: flex; justify-content: center;
+    /* `safe center` keeps the panel centred when it fits but falls back to
+       top-aligned when it does not, instead of overflowing off both edges
+       where the scroll cannot reach it. Short windows are common: a laptop
+       with browser chrome, or a split screen. */
+    align-items: safe center;
+    overflow-y: auto;
     background: rgba(6,8,18,.72); backdrop-filter: blur(4px); z-index: 10;
   }
   #overlay.hidden { display: none; }
-  .panel { text-align: center; color: #fff; max-width: 560px; padding: 24px; }
+  .panel { text-align: center; color: #fff; max-width: 560px; padding: 24px; flex: 0 0 auto; }
   .panel h1 { font-size: 42px; font-weight: 800; letter-spacing: 2px;
     background: linear-gradient(90deg, var(--cyan), var(--magenta));
     -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
