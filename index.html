@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pose Runner</title>
+<style>
+  :root {
+    --bg: #0b0e1a;
+    --cyan: #43e8ff;
+    --magenta: #ff4d9e;
+    --yellow: #ffd23f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #game { display: block; width: 100vw; height: 100vh; }
+
+  #hud {
+    position: fixed; top: 16px; right: 20px; text-align: right;
+    color: #fff; pointer-events: none; text-shadow: 0 2px 8px rgba(0,0,0,.6);
+  }
+  #score { font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+  #best  { font-size: 14px; opacity: .75; margin-top: 2px; }
+
+  #hearts { display: flex; gap: 7px; justify-content: flex-end; margin-top: 10px; }
+  .heart { position: relative; width: 24px; height: 24px; filter: drop-shadow(0 2px 5px rgba(0,0,0,.7)); }
+  .heart svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .heart .base path { fill: rgba(255,255,255,.16); }
+  .heart .fill path { fill: #ff4d6a; }
+  .heart .fillwrap { position: absolute; inset: 0; clip-path: inset(100% 0 0 0); }
+
+  #mute {
+    position: fixed; bottom: 16px; right: 16px; z-index: 20;
+    width: 38px; height: 38px; padding: 0; border-radius: 10px; cursor: pointer;
+    background: rgba(10,14,30,.6); border: 1px solid #2b3f63;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #mute svg { width: 19px; height: 19px; fill: #9fb4c8; }
+  #mute:hover { border-color: var(--cyan); }
+  #mute:hover svg { fill: #fff; }
+  #mute .off { display: none; }
+  #mute.muted .on { display: none; }
+  #mute.muted .off { display: block; }
+
+  #toast {
+    margin-top: 10px; font-size: 15px; font-weight: 800; letter-spacing: 2px;
+    color: var(--yellow); opacity: 0;
+  }
+  #toast.show { animation: toastFade 1.5s ease-out; }
+  @keyframes toastFade {
+    0%   { opacity: 0; transform: translateY(-6px); }
+    14%  { opacity: 1; transform: none; }
+    68%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  #cam-panel {
+    position: fixed; top: 16px; left: 16px; display: none;
+    background: rgba(10,14,30,.75); border: 1px solid rgba(67,232,255,.35);
+    border-radius: 12px; padding: 8px; backdrop-filter: blur(6px);
+  }
+  #cam { display: block; border-radius: 8px; width: 240px; height: 180px; }
+  #cam-status { color: var(--cyan); font-size: 13px; margin-top: 6px; text-align: center; min-height: 18px; }
+  #recal {
+    display: block; margin: 6px auto 0; font-size: 12px; color: #9fb4c8;
+    background: none; border: 1px solid #35507a; border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  }
+  #recal:hover { color: #fff; border-color: var(--cyan); }
+
+  #overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(6,8,18,.72); backdrop-filter: blur(4px); z-index: 10;
+  }
+  #overlay.hidden { display: none; }
+  .panel { text-align: center; color: #fff; max-width: 560px; padding: 24px; }
+  .panel h1 { font-size: 42px; font-weight: 800; letter-spacing: 2px;
+    background: linear-gradient(90deg, var(--cyan), var(--magenta));
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .panel .sub { color: #9fb4c8; margin: 10px 0 26px; font-size: 15px; line-height: 1.7; }
+  .btn {
+    display: inline-block; margin: 6px; padding: 14px 30px; font-size: 17px; font-weight: 700;
+    border: none; border-radius: 12px; cursor: pointer; color: #06121a;
+    background: linear-gradient(135deg, var(--cyan), #2fb8ff);
+    box-shadow: 0 6px 24px rgba(67,232,255,.35); transition: transform .1s;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.ghost { background: none; color: #cfe3f5; border: 1.5px solid #35507a; box-shadow: none; }
+  #mode-guide { margin-top: 26px; display: inline-block; text-align: left; min-height: 96px; }
+  .guide-row { display: flex; align-items: baseline; gap: 12px; color: #8fa6bd; font-size: 14px; margin: 9px 0; line-height: 1.5; }
+  .guide-row .key {
+    flex: 0 0 auto; min-width: 58px; text-align: center; color: #fff; font-size: 13px;
+    border: 1px solid #35507a; border-radius: 6px; padding: 2px 8px; background: rgba(255,255,255,.04);
+  }
+  .guide-row b { color: #fff; }
+  .big-msg { font-size: 30px; font-weight: 800; color: #fff; }
+  .over-score { font-size: 64px; font-weight: 800; color: var(--yellow); margin: 8px 0; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="score">0</div>
+  <div id="best"></div>
+  <div id="hearts"></div>
+  <div id="toast"></div>
+</div>
+
+<div id="cam-panel">
+  <canvas id="cam" width="240" height="180"></canvas>
+  <div id="cam-status">Starting camera…</div>
+  <button id="recal">Recalibrate (C)</button>
+</div>
+
+<button id="mute" title="Mute (M)">
+  <svg class="on" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4zM14 3.2v2.1a6.9 6.9 0 010 13.4v2.1a9 9 0 000-17.6z"/></svg>
+  <svg class="off" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm18.5-.9l-1.4-1.4L17 9.8l-3.1-3.1v2.8l1.7 1.7L14 12.8v2.8l3.1-3.1 3.1 3.1 1.4-1.4-3.1-3.1 3-3z"/></svg>
+</button>
+
+<div id="overlay">
+  <div class="panel" id="overlay-content"></div>
+</div>
+
+<script type="module">
+/* ============================================================
+   Pose Runner — a 3-lane runner you play with your body.
+   Pose detection runs 100% locally in the browser (MediaPipe
+   WASM); no server, no video upload.
+   ============================================================ */
+
+// ---------- DOM ----------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const camPanel = document.getElementById('cam-panel');
+const camCanvas = document.getElementById('cam');
+const camCtx = camCanvas.getContext('2d');
+const camStatus = document.getElementById('cam-status');
+const overlay = document.getElementById('overlay');
+const overlayContent = document.getElementById('overlay-content');
+const scoreEl = document.getElementById('score');
+const bestEl = document.getElementById('best');
+const heartsEl = document.getElementById('hearts');
+const toastEl = document.getElementById('toast');
+const muteBtn = document.getElementById('mute');
+
+let W = 0, H = 0;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- World / projection ----------
+const LANES = [-2.2, 0, 2.2];
+const DIVIDERS = [-1.1, 1.1];
+const ROAD_EDGE = 3.6;
+const NEAR = 6;
+const SPAWN_Z = 70;
+// world z of the near clip plane: obstacles sweep past the player and are
+// dropped once they reach it (the camera sits at z = -NEAR)
+const NEAR_CLIP = -5;
+const UNIT = () => W * 0.115;                 // world unit → screen px at z=0
+const proj = z => NEAR / (NEAR + Math.max(z, -NEAR * 0.9));
+const horizonY = () => H * 0.40;
+const baseY = () => H * 0.94;
+const groundY = z => horizonY() + (baseY() - horizonY()) * proj(z);
+const screenX = (wx, z) => W / 2 + (wx - camX) * UNIT() * proj(z);
+
+// ---------- Camera ----------
+// The camera follows the player laterally (70%) and rolls a
+// little while switching lanes, so the view visibly shifts.
+let camX = 0, camRoll = 0, prevRX = 0;
+
+// ---------- Game state ----------
+// phase: menu | loading | calibrating | ready | playing | over
+let phase = 'menu';
+let mode = 'keys'; // 'keys' | 'pose'
+const MAX_HEARTS = 3;
+const REGEN_SECONDS = 10;   // clean running time that buys back one heart
+const IFRAME_SECONDS = 1.4; // grace period after a hit
+
+const g = {
+  dist: 0, speed: 0, score: 0,
+  lane: 1, renderX: 0,
+  jumpT: -1,            // -1 = grounded, 0..1 = jump progress
+  duckUntil: 0,         // keyboard slide timer
+  poseDuck: false,      // camera-mode crouch (held posture)
+  obstacles: [], nextSpawn: 0,
+  shake: 0, overAt: 0,
+  hearts: MAX_HEARTS,
+  invuln: 0,            // seconds of grace left after a hit
+  regen: 0,             // seconds of clean running banked toward a heart
+  hitFlash: 0,
+};
+let speedTier = 0;
+
+// ---------- Hearts HUD ----------
+const HEART_PATH = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
+const heartFills = [];
+for (let i = 0; i < MAX_HEARTS; i++) {
+  const wrap = document.createElement('div');
+  wrap.className = 'heart';
+  wrap.innerHTML =
+    `<svg class="base" viewBox="0 0 24 24"><path d="${HEART_PATH}"/></svg>` +
+    `<div class="fillwrap"><svg class="fill" viewBox="0 0 24 24"><path d="${HEART_PATH}"/></svg></div>`;
+  heartsEl.appendChild(wrap);
+  heartFills.push(wrap.querySelector('.fillwrap'));
+}
+const lastFill = new Array(MAX_HEARTS).fill(-1);
+function updateHearts() {
+  for (let i = 0; i < MAX_HEARTS; i++) {
+    // full hearts are solid; the next one to come back fills from the bottom
+    const f = i < g.hearts ? 1 : (i === g.hearts ? Math.min(1, g.regen / REGEN_SECONDS) : 0);
+    const pct = Math.round((1 - f) * 100);
+    if (pct === lastFill[i]) continue;
+    lastFill[i] = pct;
+    heartFills[i].style.clipPath = `inset(${pct}% 0 0 0)`;
+  }
+}
+
+function showToast(text) {
+  toastEl.textContent = text;
+  toastEl.classList.remove('show');
+  void toastEl.offsetWidth;   // restart the animation
+  toastEl.classList.add('show');
+}
+let best = +(localStorage.getItem('poseRunnerBest') || 0);
+bestEl.textContent = best ? `BEST ${best}` : '';
+
+function resetGame() {
+  g.dist = 0; g.speed = 14; g.score = 0;
+  g.lane = 1; g.renderX = 0; g.jumpT = -1; g.duckUntil = 0;
+  g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
+  g.hearts = MAX_HEARTS; g.invuln = 0; g.regen = 0; g.hitFlash = 0;
+  speedTier = 0;
+  updateHearts();
+}
+
+function isDucking() { return g.poseDuck || performance.now() < g.duckUntil; }
+function jumpHeight() { return g.jumpT >= 0 ? Math.sin(Math.PI * g.jumpT) * 1.5 : 0; }
+
+function doJump() {
+  if (phase === 'paused') { resumeGame(); return; }
+  if (phase === 'ready') { startPlay(); return; }
+  if (phase === 'over') {
+    if (performance.now() - g.overAt > 900) { resetGame(); setPhase('playing'); sfx.jump(); }
+    return;
+  }
+  if (phase !== 'playing') return;
+  if (g.jumpT < 0) { g.jumpT = 0; g.duckUntil = 0; g.poseDuck = false; sfx.jump(); }
+}
+function doDuck() {
+  if (phase !== 'playing') return;
+  g.duckUntil = performance.now() + 750;
+  if (g.jumpT > 0.15) g.jumpT = Math.max(g.jumpT, 0.85); // air-dive: land fast
+  sfx.duck();
+}
+function setLane(l) {
+  const nl = Math.max(0, Math.min(2, l));
+  if (nl !== g.lane && phase === 'playing') sfx.whoosh();
+  g.lane = nl;
+}
+
+function startPlay() { resetGame(); setPhase('playing'); }
+
+// Losing a heart knocks the offending obstacle out of the way and grants a
+// short grace period, so one train cannot eat the whole health bar.
+function takeHit(o) {
+  if (g.invuln > 0) return;
+  g.hearts--;
+  g.regen = 0;
+  g.invuln = IFRAME_SECONDS;
+  g.shake = 1;
+  g.hitFlash = 1;
+  const i = g.obstacles.indexOf(o);
+  if (i >= 0) g.obstacles.splice(i, 1);
+  updateHearts();
+  if (g.hearts <= 0) { crash(); return; }
+  sfx.hit();
+}
+
+function crash() {
+  phase = 'over'; g.overAt = performance.now(); g.shake = 1;
+  syncMusic();
+  sfx.crash();
+  if (g.score > best) { best = g.score; localStorage.setItem('poseRunnerBest', best); }
+  bestEl.textContent = `BEST ${best}`;
+  showOverlay(`
+    <div class="big-msg">WIPEOUT!</div>
+    <div class="over-score">${g.score}</div>
+    <div class="sub">${mode === 'pose' ? 'Jump in place — or press Space — to run again' : 'Press Space to run again'}</div>
+  `);
+}
+
+// ---------- Obstacle spawning ----------
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const randLane = () => Math.floor(Math.random() * 3);
+function spawnPattern(d) {
+  const r = Math.random();
+  const add = (type, lane, depth) => g.obstacles.push({ type, lane, d, depth });
+  if (r < 0.28) {              // hurdle: jump over
+    add('hurdle', randLane(), 1.2);
+    if (Math.random() < 0.4) add('hurdle', (randLane() + 1) % 3, 1.2);
+  } else if (r < 0.52) {       // gate: slide under
+    add('bar', randLane(), 1.0);
+    if (Math.random() < 0.35) add('bar', (randLane() + 1) % 3, 1.0);
+  } else if (r < 0.82) {       // train: switch lanes
+    add('train', randLane(), 10);
+  } else {                     // two trains: one lane left open
+    const a = randLane(); let b = (a + 1 + Math.floor(Math.random() * 2)) % 3;
+    add('train', a, 10); add('train', b, 10);
+  }
+}
+
+// ---------- Main loop ----------
+let lastT = performance.now();
+function tick(now) {
+  const dt = Math.min((now - lastT) / 1000, 0.05);
+  lastT = now;
+  if (phase === 'playing') update(dt);
+
+  decayFx(dt);
+
+  // camera follow + roll (runs in every phase so menus settle too)
+  camX += (g.renderX * 0.7 - camX) * Math.min(1, dt * 10);
+  const vx = dt > 0 ? (g.renderX - prevRX) / dt : 0;
+  prevRX = g.renderX;
+  const targetRoll = Math.max(-0.05, Math.min(0.05, vx * 0.012));
+  camRoll += (targetRoll - camRoll) * Math.min(1, dt * 8);
+
+  render(now);
+  requestAnimationFrame(tick);
+}
+
+// Screen shake and the hit flash decay outside update(), so they keep settling
+// on the game-over screen where update() no longer runs.
+function decayFx(dt) {
+  g.shake = Math.max(0, g.shake - dt * 3);
+  g.hitFlash = Math.max(0, g.hitFlash - dt * 2.2);
+}
+
+function update(dt) {
+  // Speed ramps quickly at first, then keeps creeping up forever, so surviving
+  // longer is always what makes the run harder.
+  g.speed = 14 + Math.min(22, g.dist * 0.013) + Math.min(12, Math.max(0, g.dist - 1700) * 0.002);
+  g.dist += g.speed * dt;
+  g.score = Math.floor(g.dist);
+  scoreEl.textContent = g.score;
+
+  const tier = Math.floor((g.speed - 14) / 6);
+  if (tier > speedTier) { speedTier = tier; showToast('SPEED UP'); sfx.speedup(); }
+
+  if (g.invuln > 0) g.invuln = Math.max(0, g.invuln - dt);
+  if (g.hearts < MAX_HEARTS) {
+    g.regen += dt;
+    if (g.regen >= REGEN_SECONDS) { g.regen -= REGEN_SECONDS; g.hearts++; sfx.heal(); }
+  } else g.regen = 0;
+  updateHearts();
+
+  if (g.dist + SPAWN_Z > g.nextSpawn) {
+    spawnPattern(g.nextSpawn + SPAWN_Z);
+    g.nextSpawn += rand(17, 27);
+  }
+  // keep obstacles until they have swept fully past the near clip plane
+  g.obstacles = g.obstacles.filter(o => o.d + o.depth - g.dist > NEAR_CLIP);
+
+  if (g.jumpT >= 0) {
+    g.jumpT += dt / 0.62;
+    if (g.jumpT >= 1) { g.jumpT = -1; g.shake = Math.max(g.shake, 0.12); }
+  }
+
+  const target = LANES[g.lane];
+  g.renderX += (target - g.renderX) * Math.min(1, dt * 11);
+
+  // collisions (skipped entirely during the post-hit grace period)
+  if (g.invuln <= 0) {
+    const h = jumpHeight(), duck = isDucking();
+    for (const o of g.obstacles) {
+      if (o.lane !== g.lane) continue;
+      const z0 = o.d - g.dist, z1 = z0 + o.depth;
+      if (z1 < -0.4 || z0 > 0.9) continue;
+      if (Math.abs(LANES[g.lane] - g.renderX) > 0.9) continue; // lenient mid-switch
+      if ((o.type === 'hurdle' && h < 0.55) ||
+          (o.type === 'bar' && !duck && h < 0.1) ||
+          o.type === 'train') return takeHit(o);
+    }
+  }
+}
+
+// ---------- Rendering ----------
+const buildings = [[], []];
+(function genSkyline() {
+  let seed = 7;
+  const rng = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let layer = 0; layer < 2; layer++) {
+    let x = 0;
+    while (x < 4000) {
+      const w = 40 + rng() * 90, h = (layer ? 0.05 : 0.10) + rng() * (layer ? 0.09 : 0.16);
+      buildings[layer].push({ x, w, h });
+      x += w + rng() * 30;
+    }
+  }
+})();
+
+// Per-car liveries. A train is split into cars and each one picks a colour
+// deterministically from its spawn distance, so a passing train flickers
+// through several hues instead of reading as one long uniform box.
+const CAR_COLORS = [
+  { roof: '#3d4a72', side: '#242e52', front: '#4a5a8f', band: '#7fa8e8' }, // blue
+  { roof: '#733d52', side: '#4b2436', front: '#8f4a63', band: '#e884a8' }, // magenta
+  { roof: '#347366', side: '#1d4a41', front: '#3f8f7d', band: '#5fd9bd' }, // teal
+  { roof: '#733f34', side: '#4a251d', front: '#8f4f3f', band: '#e89a7f' }, // rust
+  { roof: '#563d73', side: '#38244f', front: '#6b4a8f', band: '#b088e8' }, // purple
+];
+const CHASSIS = '#141a30';
+
+function poly(pts, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function render(now) {
+  ctx.save();
+  if (g.shake > 0.01) ctx.translate((Math.random() - 0.5) * g.shake * 18, (Math.random() - 0.5) * g.shake * 14);
+  // camera roll around a point near the player
+  ctx.translate(W / 2, H * 0.62); ctx.rotate(camRoll); ctx.translate(-W / 2, -H * 0.62);
+
+  const unit = UNIT();
+  const hy = horizonY();
+
+  // sky (oversized margins cover the rolled edges)
+  const sky = ctx.createLinearGradient(0, 0, 0, hy * 1.15);
+  sky.addColorStop(0, '#0b0e2a'); sky.addColorStop(0.62, '#2a1a5e'); sky.addColorStop(1, '#b03a8c');
+  ctx.fillStyle = sky; ctx.fillRect(-90, -90, W + 180, hy * 1.15 + 90);
+
+  // sun glow (drifts opposite the camera for parallax)
+  const sunX = W * 0.5 - camX * unit * 0.18;
+  const sunG = ctx.createRadialGradient(sunX, hy, 8, sunX, hy, H * 0.24);
+  sunG.addColorStop(0, 'rgba(255,120,180,.9)'); sunG.addColorStop(1, 'rgba(255,120,180,0)');
+  ctx.fillStyle = sunG; ctx.beginPath(); ctx.arc(sunX, hy, H * 0.24, 0, 7); ctx.fill();
+
+  // city silhouettes, two parallax layers
+  for (let layer = 0; layer < 2; layer++) {
+    ctx.fillStyle = layer ? '#1b1440' : '#251a52';
+    const off = (g.dist * (layer ? 2.4 : 5)) % 4000 + camX * (layer ? 12 : 22);
+    for (const b of buildings[layer]) {
+      let bx = b.x - off; if (bx < -300) bx += 4000;
+      if (bx > W + 200) continue;
+      ctx.fillRect(bx, hy - b.h * H, b.w, b.h * H + 2);
+    }
+  }
+
+  // ground
+  const gnd = ctx.createLinearGradient(0, hy, 0, H);
+  gnd.addColorStop(0, '#171233'); gnd.addColorStop(1, '#0d0a20');
+  ctx.fillStyle = gnd; ctx.fillRect(-90, hy, W + 180, H - hy + 90);
+
+  // road
+  poly([
+    [screenX(-ROAD_EDGE, SPAWN_Z), groundY(SPAWN_Z)],
+    [screenX(ROAD_EDGE, SPAWN_Z), groundY(SPAWN_Z)],
+    [screenX(ROAD_EDGE, 0), groundY(0)],
+    [screenX(-ROAD_EDGE, 0), groundY(0)],
+  ], '#191631');
+
+  // neon curbs
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(screenX(s * ROAD_EDGE, SPAWN_Z), groundY(SPAWN_Z));
+    ctx.lineTo(screenX(s * ROAD_EDGE, 0), groundY(0));
+    ctx.strokeStyle = 'rgba(67,232,255,.8)'; ctx.lineWidth = 2.5; ctx.stroke();
+  }
+
+  // lane dashes, scrolling with distance
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2;
+  for (const dx of DIVIDERS) {
+    for (let k = 0; k < 20; k++) {
+      const zStart = k * 4 - (g.dist % 4);
+      const zEnd = zStart + 2;
+      if (zEnd < 0.2) continue;
+      ctx.beginPath();
+      ctx.moveTo(screenX(dx, zStart), groundY(zStart));
+      ctx.lineTo(screenX(dx, Math.max(zEnd, 0.2)), groundY(Math.max(zEnd, 0.2)));
+      ctx.stroke();
+    }
+  }
+
+  // Far to near. Two obstacles at the same depth (side-by-side trains) must be
+  // ordered by how far their lane sits from the camera, or the far one paints
+  // over the near one and they appear to pass through each other.
+  const sorted = [...g.obstacles].sort((a, b) =>
+    (b.d - a.d) ||
+    (Math.abs(LANES[b.lane] - camX) - Math.abs(LANES[a.lane] - camX)));
+
+  // Anything whose nose is already past the player sits between the camera and
+  // the player, so it has to be painted over them, not under.
+  const inFront = [];
+  for (const o of sorted) {
+    const z = o.d - g.dist;
+    if (z > SPAWN_Z || z + o.depth < NEAR_CLIP) continue;
+    if (z < 0) { inFront.push([o, z]); continue; }
+    drawObstacle(o, z);
+  }
+
+  // blink through the grace period so being hit is unmistakable
+  const blink = g.invuln > 0 && Math.floor(g.invuln * 14) % 2 === 0;
+  if (blink) ctx.globalAlpha = 0.28;
+  drawPlayer(now);
+  ctx.globalAlpha = 1;
+
+  for (const [o, z] of inFront) drawObstacle(o, z);
+
+  // speed streaks at high speed
+  if (phase === 'playing' && g.speed > 24) {
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1.5;
+    for (let i = 0; i < 8; i++) {
+      const y = rand(0, H), len = rand(30, 90);
+      ctx.beginPath(); ctx.moveTo(rand(0, W), y); ctx.lineTo(rand(0, W) + len, y); ctx.stroke();
+    }
+  }
+
+  if (g.hitFlash > 0.01) {
+    ctx.fillStyle = `rgba(255,60,80,${g.hitFlash * 0.32})`;
+    ctx.fillRect(-90, -90, W + 180, H + 180);
+  }
+  ctx.restore();
+}
+
+function drawObstacle(o, z) {
+  const unit = UNIT();
+  const lane = LANES[o.lane];
+
+  if (o.type === 'hurdle' || o.type === 'bar') {
+    if (z < NEAR_CLIP) return;
+    const p = proj(z), gy = groundY(z), cx = screenX(lane, z);
+
+    if (o.type === 'hurdle') {
+      // solid barrier; its height equals the jump clearance the collision
+      // check asks for, so clearing it looks exactly like clearing it
+      const w = 1.9 * unit * p, hgt = 0.55 * unit * p;
+      const x0 = cx - w / 2, yTop = gy - hgt;
+      ctx.fillStyle = '#e9edf6';
+      ctx.fillRect(x0, yTop, w, hgt);
+      const stripes = 5;
+      ctx.fillStyle = '#ff4d5e';
+      for (let i = 0; i < stripes; i += 2)
+        ctx.fillRect(x0 + (w / stripes) * i, yTop, w / stripes + 1, hgt);
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      ctx.fillRect(x0, yTop, w, hgt * 0.09);
+      ctx.fillStyle = '#252b47';
+      ctx.fillRect(x0, gy - hgt * 0.16, w, hgt * 0.16);
+    } else {
+      const w = 2.0 * unit * p, postW = 0.10 * unit * p;
+      const yTop = gy - 2.5 * unit * p, yBar = gy - 1.35 * unit * p;
+      ctx.fillStyle = '#8892b0';
+      ctx.fillRect(cx - w / 2, yTop, postW, gy - yTop);
+      ctx.fillRect(cx + w / 2 - postW, yTop, postW, gy - yTop);
+      ctx.fillStyle = '#ffd23f';
+      ctx.fillRect(cx - w / 2, yBar - 0.28 * unit * p, w, 0.28 * unit * p);
+      ctx.fillStyle = '#1a1a2e';
+      const n = 5;
+      for (let i = 0; i < n; i++)
+        if (i % 2) ctx.fillRect(cx - w / 2 + (w / n) * i, yBar - 0.28 * unit * p, w / n, 0.28 * unit * p);
+    }
+    return;
+  }
+
+  // ---- train: a real box — roof + front + whichever side the camera can see
+  // narrower than the 2.2 lane pitch so there is real clearance when you run
+  // past one — otherwise the side wall is edge-on and its livery is unreadable
+  const TW = 1.9, TH = 2.7;
+  // the nose may already be behind the player: clip it at the near plane so
+  // the body keeps sweeping past instead of freezing in place
+  const zF = Math.max(z, NEAR_CLIP), zB = z + o.depth;
+  const xL = lane - TW / 2, xR = lane + TW / 2;
+  const topY = zz => groundY(zz) - TH * unit * proj(zz);
+
+  // side face: visible only if the camera sits beside the box
+  let sideX = null;
+  if (camX < xL - 0.05) sideX = xL;
+  else if (camX > xR + 0.05) sideX = xR;
+  const bandY = (zz, f) => groundY(zz) - TH * f * unit * proj(zz);
+
+  // dark chassis spanning the whole train; the coupling gaps between cars are
+  // simply where no car body gets painted over it
+  poly([
+    [screenX(xL, zF), topY(zF)], [screenX(xR, zF), topY(zF)],
+    [screenX(xR, zB), topY(zB)], [screenX(xL, zB), topY(zB)],
+  ], CHASSIS);
+  if (sideX !== null) {
+    poly([
+      [screenX(sideX, zF), groundY(zF)], [screenX(sideX, zF), topY(zF)],
+      [screenX(sideX, zB), topY(zB)], [screenX(sideX, zB), groundY(zB)],
+    ], CHASSIS);
+  }
+
+  const nCars = Math.max(1, Math.round(o.depth / 3.2));
+  const carLen = o.depth / nCars;
+  const SEAM = 0.38;
+  const seed = Math.floor(o.d) + o.lane * 3;
+  let noseColor = CAR_COLORS[seed % CAR_COLORS.length];
+
+  for (let i = nCars - 1; i >= 0; i--) {   // far car first
+    const c0 = z + i * carLen;
+    const c1 = c0 + carLen - (i < nCars - 1 ? SEAM : 0);
+    if (c1 <= NEAR_CLIP) continue;
+    const a = Math.max(c0, NEAR_CLIP);
+    const col = CAR_COLORS[(seed + i * 2) % CAR_COLORS.length];
+    if (i === 0) noseColor = col;
+
+    poly([
+      [screenX(xL, a), topY(a)], [screenX(xR, a), topY(a)],
+      [screenX(xR, c1), topY(c1)], [screenX(xL, c1), topY(c1)],
+    ], col.roof);
+
+    if (sideX === null) continue;
+    poly([
+      [screenX(sideX, a), groundY(a)], [screenX(sideX, a), topY(a)],
+      [screenX(sideX, c1), topY(c1)], [screenX(sideX, c1), groundY(c1)],
+    ], col.side);
+    // livery stripe in the car's own accent, so it stays readable on every hue
+    poly([
+      [screenX(sideX, a), bandY(a, 0.32)], [screenX(sideX, a), bandY(a, 0.42)],
+      [screenX(sideX, c1), bandY(c1, 0.42)], [screenX(sideX, c1), bandY(c1, 0.32)],
+    ], col.band);
+    // windows, anchored to this car so they don't slide along the hull
+    for (let wz = c0 + 0.45; wz + 0.95 <= c1 - 0.3; wz += 1.3) {
+      const w1 = wz + 0.95;
+      if (w1 <= NEAR_CLIP) continue;
+      const w0 = Math.max(wz, NEAR_CLIP);
+      poly([
+        [screenX(sideX, w0), bandY(w0, 0.55)], [screenX(sideX, w0), bandY(w0, 0.82)],
+        [screenX(sideX, w1), bandY(w1, 0.82)], [screenX(sideX, w1), bandY(w1, 0.55)],
+      ], '#8fb8dd');
+    }
+  }
+
+  // front face — only while the nose is still ahead of the player; once you
+  // are alongside it, the side face is what you should be looking at
+  if (z < 0) return;
+  const pF = proj(z);
+  const fw = TW * unit * pF, fh = TH * unit * pF;
+  const fx = screenX(lane, z), fy = groundY(z);
+  ctx.fillStyle = noseColor.front;
+  ctx.fillRect(fx - fw / 2, fy - fh, fw, fh);
+  ctx.fillStyle = noseColor.band;
+  ctx.fillRect(fx - fw / 2, fy - fh * 0.42, fw, fh * 0.1);
+  ctx.fillStyle = '#bfe3ff';
+  ctx.fillRect(fx - fw * 0.34, fy - fh * 0.88, fw * 0.28, fh * 0.3);
+  ctx.fillRect(fx + fw * 0.06, fy - fh * 0.88, fw * 0.28, fh * 0.3);
+  ctx.fillStyle = '#fff3b0';
+  ctx.beginPath(); ctx.arc(fx - fw * 0.3, fy - fh * 0.16, fw * 0.05, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(fx + fw * 0.3, fy - fh * 0.16, fw * 0.05, 0, 7); ctx.fill();
+}
+
+function drawPlayer(now) {
+  const unit = UNIT();
+  const cx = screenX(g.renderX, 0);
+  const gy = groundY(0);
+  const h = jumpHeight();
+  const duck = isDucking() && g.jumpT < 0;
+  const py = gy - h * unit;
+  const runPhase = g.dist * 2.2;
+
+  // shadow
+  ctx.fillStyle = `rgba(0,0,0,${0.4 - h * 0.15})`;
+  ctx.beginPath();
+  ctx.ellipse(cx, gy - 3, unit * (0.55 - h * 0.1), unit * 0.11, 0, 0, 7);
+  ctx.fill();
+
+  const bodyH = duck ? 0.62 : 1.05, bodyW = duck ? 0.98 : 0.78;
+  const legH = duck ? 0.18 : 0.42;
+  const bob = (phase === 'playing' && g.jumpT < 0 && !duck) ? Math.abs(Math.sin(runPhase)) * 0.07 : 0;
+  const yBase = py - bob * unit;
+
+  // legs
+  if (g.jumpT >= 0) {
+    ctx.strokeStyle = '#2fb8ff'; ctx.lineWidth = unit * 0.13; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - unit * 0.16, yBase - legH * unit);
+    ctx.lineTo(cx - unit * 0.3, yBase - legH * unit + unit * 0.18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + unit * 0.16, yBase - legH * unit);
+    ctx.lineTo(cx + unit * 0.3, yBase - legH * unit + unit * 0.18); ctx.stroke();
+  } else {
+    const s = Math.sin(runPhase);
+    ctx.strokeStyle = '#2fb8ff'; ctx.lineWidth = unit * 0.13; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - unit * 0.16, yBase - legH * unit);
+    ctx.lineTo(cx - unit * 0.16 + s * unit * 0.14, yBase); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + unit * 0.16, yBase - legH * unit);
+    ctx.lineTo(cx + unit * 0.16 - s * unit * 0.14, yBase); ctx.stroke();
+  }
+
+  // body
+  const bx = cx - bodyW * unit / 2, byTop = yBase - (legH + bodyH) * unit;
+  ctx.fillStyle = '#43e8ff';
+  roundRect(bx, byTop, bodyW * unit, bodyH * unit, unit * 0.18);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.25)';
+  roundRect(bx + bodyW * unit * 0.12, byTop + bodyH * unit * 0.12, bodyW * unit * 0.3, bodyH * unit * 0.55, unit * 0.1);
+  ctx.fill();
+
+  // head
+  const headR = unit * 0.27;
+  const headY = byTop - headR * (duck ? 0.4 : 0.75);
+  ctx.fillStyle = '#eef7ff';
+  ctx.beginPath(); ctx.arc(cx, headY, headR, 0, 7); ctx.fill();
+  ctx.fillStyle = '#132033';
+  roundRect(cx - headR * 0.62, headY - headR * 0.36, headR * 1.24, headR * 0.55, headR * 0.25);
+  ctx.fill();
+  ctx.fillStyle = '#43e8ff';
+  ctx.fillRect(cx - headR * 0.35, headY - headR * 0.2, headR * 0.24, headR * 0.22);
+  ctx.fillRect(cx + headR * 0.12, headY - headR * 0.2, headR * 0.24, headR * 0.22);
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ---------- Sound (WebAudio synth, zero asset files) ----------
+let audioMuted = localStorage.getItem('poseRunnerMuted') === '1';
+
+const sfx = (() => {
+  let ac = null;
+  // Safari (and Chrome, when the context predates a user gesture) hands back a
+  // suspended context that stays silent until it is explicitly resumed.
+  const ensure = () => {
+    if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === 'suspended') ac.resume();
+    return ac;
+  };
+  function tone(f0, f1, dur, type = 'sine', vol = 0.18) {
+    if (audioMuted) return;
+    try {
+      const a = ensure(), t = a.currentTime;
+      const o = a.createOscillator(), gn = a.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dur);
+      gn.gain.setValueAtTime(vol, t);
+      gn.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(gn).connect(a.destination);
+      o.start(t); o.stop(t + dur);
+    } catch (e) { /* stay silent if audio is unavailable */ }
+  }
+  return {
+    jump: () => tone(420, 780, 0.18, 'sine'),
+    duck: () => tone(300, 140, 0.15, 'sine'),
+    whoosh: () => tone(600, 200, 0.1, 'triangle', 0.1),
+    hit: () => { tone(320, 90, 0.28, 'square', 0.2); tone(180, 70, 0.22, 'sawtooth', 0.12); },
+    heal: () => { tone(520, 900, 0.22, 'sine', 0.16); },
+    speedup: () => tone(680, 1180, 0.2, 'triangle', 0.11),
+    crash: () => { tone(200, 45, 0.4, 'sawtooth', 0.25); tone(160, 40, 0.5, 'square', 0.15); },
+    unlock: () => ensure(),
+    ctx: () => ensure(),
+  };
+})();
+
+// ---------- Background music ----------
+// A four-bar Am–F–C–G loop synthesised on the fly: warm pad, soft bass, a
+// delayed pentatonic pluck and a barely-there pulse. Notes are scheduled a
+// little ahead of the audio clock from the render loop, so nothing is a file.
+const music = (() => {
+  const BPM = 82;
+  const STEP = 60 / BPM / 2;                 // one eighth note
+  const mtof = n => 440 * Math.pow(2, (n - 69) / 12);
+  const CHORDS = [
+    [57, 60, 64],  // Am
+    [53, 57, 60],  // F
+    [48, 52, 55],  // C
+    [55, 59, 62],  // G
+  ];
+  const ARP = [0, 2, null, 1, 2, null, 1, 2];
+
+  let a = null, master = null, padBus = null, arpBus = null, noiseBuf = null;
+  let nextTime = 0, step = 0, running = false, level = 0, timer = null;
+  const LOOKAHEAD = 0.5;
+
+  function build() {
+    a = sfx.ctx();
+    master = a.createGain();
+    master.gain.value = 0;
+    master.connect(a.destination);
+
+    padBus = a.createBiquadFilter();
+    padBus.type = 'lowpass'; padBus.frequency.value = 950;
+    padBus.connect(master);
+
+    arpBus = a.createGain(); arpBus.gain.value = 1;
+    const delay = a.createDelay(1);
+    delay.delayTime.value = STEP * 1.5;       // dotted-eighth echo
+    const damp = a.createBiquadFilter();
+    damp.type = 'lowpass'; damp.frequency.value = 1700;
+    const fb = a.createGain(); fb.gain.value = 0.34;
+    arpBus.connect(delay); delay.connect(damp); damp.connect(fb); fb.connect(delay);
+    damp.connect(master); arpBus.connect(master);
+
+    noiseBuf = a.createBuffer(1, Math.floor(a.sampleRate * 0.3), a.sampleRate);
+    const ch = noiseBuf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+  }
+
+  function pluck(freq, t, vol) {
+    const o = a.createOscillator(), g = a.createGain(), f = a.createBiquadFilter();
+    o.type = 'triangle'; o.frequency.value = freq;
+    f.type = 'lowpass'; f.frequency.value = 2400;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
+    o.connect(f).connect(g).connect(arpBus);
+    o.start(t); o.stop(t + 0.8);
+  }
+
+  function bass(freq, t, dur) {
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.42, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  function pad(notes, t, dur) {
+    for (const n of notes) for (const det of [-5, 5]) {
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'triangle'; o.frequency.value = mtof(n); o.detune.value = det;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.6);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(padBus);
+      o.start(t); o.stop(t + dur + 0.1);
+    }
+  }
+
+  function kick(t) {
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(115, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+    g.gain.setValueAtTime(0.4, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + 0.2);
+  }
+
+  function hat(t, vol) {
+    const s = a.createBufferSource(); s.buffer = noiseBuf;
+    const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7500;
+    const g = a.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+    s.connect(hp).connect(g).connect(master);
+    s.start(t, 0, 0.06);
+  }
+
+  function scheduleStep(s, t) {
+    const bar = Math.floor(s / 8) % 4, beat = s % 8;
+    const chord = CHORDS[bar];
+    if (beat === 0) {
+      bass(mtof(chord[0] - 12), t, STEP * 8 * 0.92);
+      pad(chord, t, STEP * 8 * 0.95);
+      kick(t);
+    }
+    if (beat === 4) kick(t);
+    if (beat % 2 === 1) hat(t, 0.05);
+    const idx = ARP[beat];
+    if (idx !== null) pluck(mtof(chord[idx] + 12), t, beat === 0 ? 0.16 : 0.11);
+  }
+
+  return {
+    start() {
+      if (running || audioMuted) return;
+      try {
+        if (!a) build();
+        running = true;
+        step = 0;                        // every run opens on bar one
+        nextTime = a.currentTime + 0.08;
+        // Deliberately not driven by the render loop: requestAnimationFrame
+        // freezes in a background tab, which would kill the music outright.
+        if (!timer) timer = setInterval(() => this.tick(), 60);
+      } catch (e) { running = false; console.error('music.start failed', e); }
+    },
+    stop() {
+      running = false;
+      if (timer) { clearInterval(timer); timer = null; }
+      this.setLevel(0);                  // already-queued notes fade out
+    },
+    debug: () => ({ running, hasCtx: !!a, level, gain: master ? master.gain.value : null,
+                    step, ahead: a ? +(nextTime - a.currentTime).toFixed(3) : null }),
+    // Timers are throttled in a hidden tab, so resync when we fall behind
+    // rather than dumping a burst of stale notes all at once.
+    tick() {
+      if (!running || !a || audioMuted) return;   // don't synth into a silent bus
+      if (nextTime < a.currentTime) nextTime = a.currentTime + 0.05;
+      while (nextTime < a.currentTime + LOOKAHEAD) {
+        scheduleStep(step, nextTime);
+        nextTime += STEP;
+        step++;
+      }
+    },
+    setLevel(v) {
+      level = v;
+      if (!master || !a) return;
+      const target = audioMuted ? 0 : v;
+      master.gain.cancelScheduledValues(a.currentTime);
+      master.gain.setTargetAtTime(target, a.currentTime, 0.35);
+    },
+  };
+})();
+
+// The soundtrack belongs to the run: it starts when you do and ends with it.
+// A pause only ducks it, since the run has not actually ended.
+function syncMusic() {
+  if (phase === 'playing') { music.start(); music.setLevel(0.42); }
+  else if (phase === 'paused') music.setLevel(0.12);
+  else music.stop();
+}
+
+function setMuted(m) {
+  audioMuted = m;
+  localStorage.setItem('poseRunnerMuted', m ? '1' : '0');
+  muteBtn.classList.toggle('muted', m);
+  syncMusic();
+}
+
+// Audio can only start from a user gesture, and the menu buttons are not the
+// only way in — wake the context on the first interaction of any kind. The
+// soundtrack itself waits for the run to begin.
+for (const evt of ['pointerdown', 'keydown']) {
+  window.addEventListener(evt, () => sfx.unlock(), { once: true });
+}
+
+muteBtn.classList.toggle('muted', audioMuted);
+muteBtn.onclick = () => setMuted(!audioMuted);
+
+// ---------- Keyboard ----------
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(k)) e.preventDefault();
+  if (k === 'm' || k === 'M') { setMuted(!audioMuted); return; }
+  if (phase === 'menu') return;
+  if (k === 'p' || k === 'P' || k === 'Escape') {
+    if (phase === 'playing') pauseGame('manual');
+    else if (phase === 'paused') resumeGame();
+    return;
+  }
+  if (phase === 'paused') {
+    if (k === ' ' || k === 'ArrowUp' || k === 'w') resumeGame();
+    return;
+  }
+  if (phase === 'over') {
+    if (k === ' ' || k === 'ArrowUp' || k === 'w') doJump();
+    return;
+  }
+  if (phase === 'ready' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', ' '].includes(k)) {
+    startPlay(); return;
+  }
+  if (phase !== 'playing') return;
+  if (k === 'ArrowUp' || k === 'w' || k === ' ') doJump();
+  else if (k === 'ArrowDown' || k === 's') doDuck();
+  else if (k === 'ArrowLeft' || k === 'a') setLane(g.lane - 1);
+  else if (k === 'ArrowRight' || k === 'd') setLane(g.lane + 1);
+  else if (k === 'c' && mode === 'pose') startCalibration();
+});
+
+// ---------- Overlays ----------
+function showOverlay(html) { overlayContent.innerHTML = html; overlay.classList.remove('hidden'); }
+function hideOverlay() { overlay.classList.add('hidden'); }
+function setPhase(p) {
+  phase = p;
+  syncMusic();
+  if (p === 'playing') hideOverlay();
+  if (p === 'ready') showOverlay(`
+    <div class="big-msg">${mode === 'pose' ? 'Jump in place to start!' : 'Press any arrow key to start'}</div>
+    <div class="sub" style="margin-top:14px">${mode === 'pose'
+      ? 'Step left / right to switch lanes · Jump in place · Crouch to slide<br>Press C anytime to recalibrate'
+      : '← → switch lanes · ↑ jump · ↓ slide'}</div>
+  `);
+}
+
+// ---------- Pause ----------
+// autoPauseReason tracks *why* we paused, so losing sight of the player can
+// resume itself when they step back in, while a manual pause never does.
+let autoPauseReason = null;
+
+function pauseGame(reason, title) {
+  if (phase !== 'playing') return;
+  phase = 'paused';
+  autoPauseReason = reason;
+  syncMusic();
+  showOverlay(`
+    <div class="big-msg">${title || 'PAUSED'}</div>
+    <div class="sub">${mode === 'pose'
+      ? 'Jump in place to resume — or press P / Esc'
+      : 'Press P, Esc, or Space to resume'}</div>
+    <button class="btn" id="btn-resume">Resume</button>
+  `);
+  document.getElementById('btn-resume').onclick = resumeGame;
+}
+
+function resumeGame() {
+  if (phase !== 'paused') return;
+  autoPauseReason = null;
+  setPhase('playing');
+}
+
+window.addEventListener('blur', () => pauseGame('blur'));
+
+function showMenu() {
+  phase = 'menu';
+  syncMusic();
+  showOverlay(`
+    <h1>POSE RUNNER</h1>
+    <div class="sub">A runner you play with your body.<br>
+    Stand 1–2 m from your camera: step sideways to switch lanes,<br>jump in place, crouch to slide.<br>
+    Everything runs locally in your browser — no video ever leaves your device.</div>
+    <button class="btn" id="btn-pose">Camera Mode</button>
+    <button class="btn ghost" id="btn-keys">Keyboard Mode</button>
+    <div id="mode-guide"></div>
+  `);
+  const guides = {
+    pose: `
+      <div class="guide-row"><span class="key">← →</span><span><b>Step sideways.</b> Each step moves you one lane. Lean or step out and settle back into a comfortable stance — you do not have to hold the position. Step the other way to come back.</span></div>
+      <div class="guide-row"><span class="key">↑</span><span><b>Jump in place.</b> Do a small real hop — the jump triggers the moment your hips rise above your calibrated height.</span></div>
+      <div class="guide-row"><span class="key">↓</span><span><b>Crouch.</b> Bend your knees and drop your hips to slide; stay low to keep sliding, stand up to run again.</span></div>`,
+    keys: `
+      <div class="guide-row"><span class="key">← →</span><span>Switch lanes</span></div>
+      <div class="guide-row"><span class="key">↑</span><span>Jump</span></div>
+      <div class="guide-row"><span class="key">↓</span><span>Slide</span></div>`,
+  };
+  const guideEl = document.getElementById('mode-guide');
+  const setGuide = m => { guideEl.innerHTML = guides[m]; };
+  setGuide('pose');
+  const bp = document.getElementById('btn-pose'), bk = document.getElementById('btn-keys');
+  for (const [btn, m] of [[bp, 'pose'], [bk, 'keys']]) {
+    btn.addEventListener('mouseenter', () => setGuide(m));
+    btn.addEventListener('focus', () => setGuide(m));
+  }
+  bp.onclick = () => { sfx.unlock(); startPoseMode(); };
+  bk.onclick = () => { sfx.unlock(); mode = 'keys'; setPhase('ready'); };
+}
+
+// ============================================================
+//                 Pose control (MediaPipe Pose)
+// ============================================================
+let landmarker = null, video = null;
+let baseHipY = 0, baseShY = 0, baseCX = 0, baseTorso = 0.25;
+// the values calibration actually measured; the adaptive baseline is only
+// allowed to wander a bounded distance from them
+let calHipY = 0, calShY = 0, calCX = 0;
+// Hip landmarks get unreliable when the lower body silhouette is hidden — a
+// long skirt or dress is the common case. Shoulders stay dependable, so the
+// detector degrades to an upper-body-only mode instead of going dead.
+let hipsUsable = true;
+let calSamples = [];
+let lastJumpAt = 0, lastSeenAt = 0;
+// smoothed landmark signals + jump state machine
+let sHipY = 0, sShY = 0, sCx = 0, sTorso = 0.25, poseSmoothed = false;
+let prevVY = 0, lastPoseAt = 0, lastDuckAt = 0, jumpArmed = true;
+let prevCx = 0, laneArmed = true, laneStillSince = 0;
+
+// Landmark x is normalised by frame WIDTH and y by frame HEIGHT, so on a 4:3
+// feed a horizontal move reads 33% smaller than the same distance vertically.
+// Everything is scaled against torso length (a y measurement), so lateral
+// offsets have to be converted before they can be compared against it.
+const videoAspect = () =>
+  (video && video.videoWidth) ? video.videoWidth / video.videoHeight : 4 / 3;
+
+// Thresholds as fractions of torso length — distance-invariant, and shared
+// with the camera overlay so the guides always match the real trigger points.
+function poseTh() {
+  return {
+    // A normal in-place hop lifts the hips ~10cm on a ~50cm torso, and the
+    // smoothing filter shaves the peak further, so this sits well under that.
+    // Upward speed, not height, is what keeps drift from faking a jump.
+    jump: baseTorso * 0.18,
+    // Crouching is measured as the larger of the shoulder and hip drop, so a
+    // forward bend at the waist counts too — that is how a lot of people
+    // actually duck, and watching hips alone missed it completely.
+    duck: baseTorso * 0.19,
+    // ~13cm of body-centre travel on a 50cm torso: a decisive lean or a small
+    // side step, not the half-metre stride the un-corrected maths demanded.
+    lane: baseTorso * 0.26,
+    center: baseTorso * 0.12,
+  };
+}
+let calibrated = false;
+
+async function startPoseMode() {
+  mode = 'pose';
+  camPanel.style.display = 'block';
+  phase = 'loading';
+  showOverlay(`<div class="big-msg">Loading pose model…</div><div class="sub">First load takes ~5–10 s</div>`);
+  try {
+    const visionMod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm');
+    const { FilesetResolver, PoseLandmarker } = visionMod;
+    const fileset = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    landmarker = await PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+        delegate: 'GPU',
+      },
+      runningMode: 'VIDEO',
+      numPoses: 1,
+    });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' }, audio: false,
+    });
+    video = document.createElement('video');
+    video.srcObject = stream; video.playsInline = true; video.muted = true;
+    await video.play();
+    requestAnimationFrame(poseLoop);
+    startCalibration();
+  } catch (err) {
+    console.error(err);
+    showOverlay(`
+      <div class="big-msg">Camera unavailable</div>
+      <div class="sub">${err.name === 'NotAllowedError'
+        ? 'Camera permission was denied. Allow it and refresh, or play with the keyboard.'
+        : 'Could not load the model or camera (the model loads from a CDN — check your connection). You can still play with the keyboard.'}</div>
+      <button class="btn ghost" id="btn-fallback">Use Keyboard Mode</button>`);
+    document.getElementById('btn-fallback').onclick = () => { mode = 'keys'; camPanel.style.display = 'none'; setPhase('ready'); };
+  }
+}
+
+function startCalibration() {
+  calibrated = false; calSamples = [];
+  poseSmoothed = false; jumpArmed = true; laneArmed = true; laneStillSince = 0;
+  phase = 'calibrating';
+  showOverlay(`<div class="big-msg">Calibrating</div><div class="sub">Stand upright facing the camera and hold still for 2 s.<br>Make sure your upper body is in frame.</div>`);
+}
+
+function poseLoop(now) {
+  if (video && video.readyState >= 2 && landmarker) {
+    let result = null;
+    try { result = landmarker.detectForVideo(video, now); } catch (e) { /* skip a frame on timestamp hiccups */ }
+    handlePose(result, now);
+    drawCam(result);
+  }
+  requestAnimationFrame(poseLoop);
+}
+
+function handlePose(result, now) {
+  const lm = result && result.landmarks && result.landmarks[0];
+  if (!lm) {
+    if (now - lastSeenAt > 800) camStatus.textContent = "Can't see you — step back, upper body in frame";
+    // nobody in frame is nobody at the keyboard either: hold the run
+    if (now - lastSeenAt > 2000) pauseGame('pose', 'Where did you go?');
+    return;
+  }
+  const [ls, rs, lh, rh] = [lm[11], lm[12], lm[23], lm[24]];
+  // Shoulders are the only landmarks we insist on. Requiring hips too used to
+  // reject the whole frame whenever the lower body was hard to read, which
+  // left anyone in a long skirt or dress with a game that simply did nothing.
+  const shVis = Math.min(ls.visibility ?? 1, rs.visibility ?? 1);
+  const hipVis = Math.min(lh.visibility ?? 1, rh.visibility ?? 1);
+  if (shVis < 0.5) { camStatus.textContent = 'Keep your upper body in frame'; return; }
+  hipsUsable = hipVis >= 0.6;
+  lastSeenAt = now;
+  // back in frame: pick the run up again (only if losing you is what paused it)
+  if (phase === 'paused' && autoPauseReason === 'pose') resumeGame();
+
+  const aspect = videoAspect();
+  const shoulderY = (ls.y + rs.y) / 2;
+  const hipY = (lh.y + rh.y) / 2;
+
+  // Mirrored coords: mx=0 is the left of the mirrored view (player's left).
+  // Shoulders are weighted over hips because leaning — the quick, natural way
+  // to change lanes — swings the shoulders while the hips barely move; an even
+  // average threw away half of that motion.
+  const shoulderMid = 1 - (ls.x + rs.x) / 2;
+  const hipMid = 1 - (lh.x + rh.x) / 2;
+  const cx = hipsUsable ? shoulderMid * 0.62 + hipMid * 0.38 : shoulderMid;
+
+  // Scale reference. Shoulder-to-hip is the better measure when we can trust
+  // the hips; otherwise fall back to shoulder width, which clothing never
+  // hides. (Shoulder width is an x measurement, so it needs the aspect fix.)
+  const torso = hipsUsable
+    ? Math.max(0.08, hipY - shoulderY)
+    : Math.max(0.08, Math.abs(ls.x - rs.x) * aspect * 1.15);
+
+  // Light smoothing: the lite model jitters by a few pixels frame to frame and
+  // a single spike used to be enough to fire a jump.
+  if (!poseSmoothed) {
+    sHipY = hipY; sShY = shoulderY; sCx = cx; sTorso = torso;
+    prevVY = hipsUsable ? hipY : shoulderY;
+    poseSmoothed = true;
+  } else {
+    sHipY += (hipY - sHipY) * 0.6;
+    sShY += (shoulderY - sShY) * 0.6;
+    sCx += (cx - sCx) * 0.6;
+    sTorso += (torso - sTorso) * 0.08;   // body size changes slowly
+  }
+
+  if (phase === 'calibrating') {
+    calSamples.push({ cx, hipY, shoulderY, torso });
+    camStatus.textContent = `Calibrating… ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
+    if (calSamples.length >= 50) {
+      baseCX = avg(calSamples.map(s => s.cx));
+      baseHipY = avg(calSamples.map(s => s.hipY));
+      baseShY = avg(calSamples.map(s => s.shoulderY));
+      baseTorso = avg(calSamples.map(s => s.torso));
+      calHipY = baseHipY; calShY = baseShY; calCX = baseCX;
+      calibrated = true;
+      prevVY = hipsUsable ? sHipY : sShY;
+      prevCx = sCx; laneArmed = true; laneStillSince = 0;
+      lastPoseAt = now; jumpArmed = true; lastDuckAt = 0;
+      setPhase('ready');
+      camStatus.textContent = 'Calibrated';
+    }
+    return;
+  }
+  if (!calibrated) return;
+
+  const th = poseTh();
+  const dt = Math.min(0.2, Math.max(0.008, (now - lastPoseAt) / 1000));
+  lastPoseAt = now;
+
+  // Vertical reference: hips when we can trust them, shoulders otherwise.
+  const vy = hipsUsable ? sHipY : sShY;
+  const baseVY = hipsUsable ? baseHipY : baseShY;
+  const rise = baseVY - vy;                            // + = body above baseline
+  const dx = (sCx - baseCX) * aspect;                  // now comparable to torso
+
+  // Crouch: whichever drops further. A squat lowers both; bending forward at
+  // the waist lowers the shoulders while the hips barely move, and that used
+  // to go completely unnoticed.
+  const shDrop = sShY - baseShY;
+  const drop = hipsUsable ? Math.max(shDrop, sHipY - baseHipY) : shDrop;
+  g.poseDuck = drop > th.duck;
+  if (g.poseDuck) lastDuckAt = now;
+
+  // Adaptive baseline. Standing a little further from the camera makes you
+  // smaller and lifts your hips in frame; with a frozen baseline that drift
+  // alone used to cross the jump threshold. While you are settled, let the
+  // baseline creep toward where you actually are.
+  const settled = Math.abs(rise) < baseTorso * 0.12 && g.jumpT < 0 && !g.poseDuck;
+  if (settled) {
+    baseShY += (sShY - baseShY) * 0.02;
+    baseShY = clamp(baseShY, calShY - baseTorso * 0.6, calShY + baseTorso * 0.6);
+    if (hipsUsable) baseHipY += (sHipY - baseHipY) * 0.02;
+    baseTorso += (sTorso - baseTorso) * 0.02;
+    // Sideways re-centring is not done here — the step detector owns baseCX,
+    // and a second source drifting it would fight the one-step-one-lane rule.
+    const limY = baseTorso * 0.6;
+    baseHipY = clamp(baseHipY, calHipY - limY, calHipY + limY);
+  }
+
+  // Jump needs height *and* upward speed, so slow drift can never fake it.
+  // It also has to fall back near the baseline before it can fire again.
+  const vUp = (prevVY - vy) / dt / baseTorso;          // torso lengths / second
+  prevVY = vy;
+  if (jumpArmed && rise > th.jump && vUp > 0.55 &&
+      now - lastJumpAt > 380 && now - lastDuckAt > 300) {
+    jumpArmed = false;
+    lastJumpAt = now;
+    doJump();
+  }
+  if (!jumpArmed && rise < th.jump * 0.4) jumpArmed = true;
+
+  // Lane control is *relative*: one step moves you one lane, wherever you
+  // happen to be standing. Mapping absolute position onto a lane meant the
+  // zones were only ~13cm wide, so a single long stride crossed two
+  // boundaries at once and skipped a lane.
+  const vLat = Math.abs(sCx - prevCx) * aspect / dt / baseTorso;   // torso/sec
+  prevCx = sCx;
+
+  if (laneArmed && Math.abs(dx) > th.lane) {
+    const next = clamp(g.lane + Math.sign(dx), 0, 2);
+    if (next !== g.lane) setLane(next);
+    laneArmed = false;
+    laneStillSince = 0;
+  }
+  if (!laneArmed) {
+    // Re-arm only once you have actually stopped moving, and only then treat
+    // where you now stand as the new neutral. Re-centring the instant a step
+    // fires would let the back half of that same stride trigger again.
+    if (vLat < 0.5) {
+      if (!laneStillSince) laneStillSince = now;
+      if (now - laneStillSince > 180) {
+        const lim = baseTorso * 1.2 / aspect;
+        baseCX = clamp(sCx, calCX - lim, calCX + lim);
+        laneArmed = true;
+        laneStillSince = 0;
+      }
+    } else laneStillSince = 0;
+  }
+
+  if (phase === 'playing') {
+    camStatus.textContent = g.poseDuck ? 'Slide' : (g.jumpT >= 0 ? 'Jump!' : ['Left lane', 'Center lane', 'Right lane'][g.lane]);
+  }
+}
+
+const avg = a => a.reduce((s, v) => s + v, 0) / a.length;
+
+function drawCam(result) {
+  const w = camCanvas.width, h = camCanvas.height;
+  camCtx.save();
+  camCtx.translate(w, 0); camCtx.scale(-1, 1);
+  camCtx.drawImage(video, 0, 0, w, h);
+  camCtx.restore();
+
+  if (calibrated) {
+    const th = poseTh();
+    // lane boundaries — converted back out of torso units into frame x
+    const laneX = th.lane / videoAspect();
+    for (const s of [-1, 1]) {
+      const x = (baseCX + s * laneX) * w;
+      camCtx.strokeStyle = 'rgba(67,232,255,.6)'; camCtx.lineWidth = 1.5;
+      camCtx.setLineDash([5, 4]);
+      camCtx.beginPath(); camCtx.moveTo(x, 0); camCtx.lineTo(x, h); camCtx.stroke();
+    }
+    // jump and crouch guides, drawn around whichever baseline is in use
+    const bV = hipsUsable ? baseHipY : baseShY;
+    camCtx.setLineDash([4, 4]);
+    camCtx.strokeStyle = 'rgba(120,255,180,.5)';
+    const jy = (bV - th.jump) * h;
+    camCtx.beginPath(); camCtx.moveTo(0, jy); camCtx.lineTo(w, jy); camCtx.stroke();
+    camCtx.strokeStyle = 'rgba(255,140,120,.5)';
+    const dy = (baseShY + th.duck) * h;      // crouch reads off the shoulders
+    camCtx.beginPath(); camCtx.moveTo(0, dy); camCtx.lineTo(w, dy); camCtx.stroke();
+    camCtx.setLineDash([]);
+    camCtx.strokeStyle = 'rgba(255,210,63,.55)';
+    camCtx.beginPath(); camCtx.moveTo(0, bV * h); camCtx.lineTo(w, bV * h); camCtx.stroke();
+  }
+
+  const lm = result && result.landmarks && result.landmarks[0];
+  if (lm) {
+    camCtx.fillStyle = '#ff4d9e';
+    for (const i of [0, 11, 12, 23, 24, 25, 26]) {
+      const p = lm[i]; if (!p) continue;
+      camCtx.beginPath();
+      camCtx.arc((1 - p.x) * w, p.y * h, 3.5, 0, 7);
+      camCtx.fill();
+    }
+  }
+}
+
+document.getElementById('recal').onclick = () => { if (mode === 'pose') startCalibration(); };
+
+// debug hooks (used by automated tests; harmless in production)
+window.__g = g;
+window.__dbg = {
+  get phase() { return phase; },
+  set phase(p) { phase = p; },
+  freeze() { phase = 'frozen'; render(performance.now()); },
+  get camX() { return camX; },
+  get camRoll() { return camRoll; },
+  step: (n = 1, dt = 1 / 60) => {
+    for (let i = 0; i < n && phase === 'playing'; i++) {
+      update(dt);
+      decayFx(dt);
+      camX += (g.renderX * 0.7 - camX) * Math.min(1, dt * 10);
+      const vx = (g.renderX - prevRX) / dt; prevRX = g.renderX;
+      camRoll += (Math.max(-0.05, Math.min(0.05, vx * 0.012)) - camRoll) * Math.min(1, dt * 8);
+    }
+    render(performance.now());
+  },
+  startPlay, doJump, doDuck, setLane,
+  music,
+  // pose internals, so the detector can be driven with synthetic landmarks
+  handlePose, startCalibration, poseTh,
+  poseBase: () => ({ baseHipY, baseShY, baseCX, baseTorso, calibrated, jumpArmed, hipsUsable }),
+  setCalibrated: v => { calibrated = v; },
+};
+updateHearts();
+
+showMenu();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
