@@ -2,7 +2,9 @@
 
 **[▶ Play it in your browser](https://chuyuyan.github.io/webcam-pose-runner/)** — desktop and a webcam recommended; there is a keyboard fallback if you would rather not turn the camera on.
 
-A 3-lane endless runner you play with your body: step sideways to switch lanes, jump in place, crouch to slide. Pose detection (MediaPipe Pose) runs 100% locally in the browser — no server, no video upload.
+A 3-lane endless runner you play with your body: step sideways to switch lanes, jump in place, crouch to slide. Pose detection (MediaPipe Pose) runs 100% locally in the browser — **camera frames never leave your device**, and by default the game makes no requests to any server of mine at all.
+
+Accounts are optional and **off by default** (see [Accounts](#accounts-optional)). Even when turned on, the only thing sent is your score — never camera data.
 
 ## Run
 
@@ -57,6 +59,25 @@ Everything is synthesised at runtime with WebAudio — there are no audio files.
 The soundtrack belongs to the run: it starts when the run does and stops when you wipe out, so the menu and the game-over screen are silent. Pausing only ducks it, since the run has not actually ended. Every run opens on bar one.
 
 Click the speaker in the bottom-right or press `M` to mute; the choice is remembered in `localStorage`. Browsers only allow audio to start from a user gesture, so the context is woken on the first click or keypress and resumed if it comes back suspended (Safari always does this).
+
+## Accounts (optional)
+
+Out of the box the game is entirely local: your best score lives in
+`localStorage` and nothing is sent anywhere.
+
+To add cloud best scores and a global leaderboard, point the game at a
+[playkit](https://github.com/Chuyuyan/playkit) server by filling in the meta tag
+in `index.html`:
+
+```html
+<meta name="playkit-url" content="https://your-playkit-host">
+```
+
+With it set, players can optionally sign in; their best score syncs across
+devices and the game-over screen shows the top runs. Signed-out players get
+exactly the original local-only behaviour.
+
+Only the score is ever transmitted. Pose detection stays on-device regardless.
 
 ## Debugging
 
