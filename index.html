@@ -1162,6 +1162,27 @@ let prevCx = 0, laneArmed = true, laneStillSince = 0;
 const videoAspect = () =>
   (video && video.videoWidth) ? video.videoWidth / video.videoHeight : 4 / 3;
 
+// Framing target, in the mirrored preview's coordinates. Thresholds are
+// already torso-scaled so distance does not change what a gesture means, but
+// framing still decides how *precise* the reading is: stand too far and the
+// body covers too few pixels, so landmark noise grows relative to torso
+// length; stand too close and limbs leave the frame and get guessed at; stand
+// off to one side and there is no symmetric room left to step into.
+const FRAME_BOX = { x0: 0.30, x1: 0.70, y0: 0.08, y1: 0.94 };
+const TORSO_MIN = 0.15, TORSO_MAX = 0.40;
+let framingOk = false, framingHint = '';
+
+function checkFraming(cxNow, shY, hipY, torsoNow) {
+  if (torsoNow < TORSO_MIN) return { ok: false, hint: 'Come closer' };
+  if (torsoNow > TORSO_MAX) return { ok: false, hint: 'Step back' };
+  // the preview is a mirror, so left and right are the player's own
+  if (cxNow < FRAME_BOX.x0 + 0.05) return { ok: false, hint: 'Move right, into the box' };
+  if (cxNow > FRAME_BOX.x1 - 0.05) return { ok: false, hint: 'Move left, into the box' };
+  if (shY < FRAME_BOX.y0) return { ok: false, hint: 'Tilt the camera down' };
+  if (hipsUsable && hipY > FRAME_BOX.y1) return { ok: false, hint: 'Step back — hips out of frame' };
+  return { ok: true, hint: '' };
+}
+
 // Thresholds as fractions of torso length — distance-invariant, and shared
 // with the camera overlay so the guides always match the real trigger points.
 function poseTh() {
@@ -1194,11 +1215,19 @@ async function startPoseMode() {
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
     landmarker = await PoseLandmarker.createFromOptions(fileset, {
       baseOptions: {
-        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+        // `full` rather than `lite`: a few MB more to download and a little
+        // more GPU, for noticeably steadier landmarks. The lite model's
+        // jitter was a real part of why the controls felt imprecise.
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
         delegate: 'GPU',
       },
       runningMode: 'VIDEO',
       numPoses: 1,
+      // Bias toward holding a lock on someone already found, rather than
+      // re-detecting from scratch and popping to a slightly different pose.
+      minPoseDetectionConfidence: 0.5,
+      minPosePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.6,
     });
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480, facingMode: 'user' }, audio: false,
@@ -1224,7 +1253,7 @@ function startCalibration() {
   calibrated = false; calSamples = [];
   poseSmoothed = false; jumpArmed = true; laneArmed = true; laneStillSince = 0;
   phase = 'calibrating';
-  showOverlay(`<div class="big-msg">Calibrating</div><div class="sub">Stand upright facing the camera and hold still for 2 s.<br>Make sure your upper body is in frame.</div>`);
+  showOverlay(`<div class="big-msg">Line yourself up</div><div class="sub">Step into the box in the camera preview, top left, and stand upright.<br>The box turns green when your framing is good — hold it for 2 seconds.<br>Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.</div>`);
 }
 
 function poseLoop(now) {
@@ -1240,9 +1269,17 @@ function poseLoop(now) {
 function handlePose(result, now) {
   const lm = result && result.landmarks && result.landmarks[0];
   if (!lm) {
+    // A crouch is exactly the posture most likely to lose the pose: on a
+    // desk-height webcam you drop out of frame entirely, and the compressed
+    // shape is the hardest for the model to read. Accusing someone of
+    // wandering off while they are holding a slide is just wrong, so if we
+    // were watching them crouch when the pose went, wait a lot longer.
+    const lostFor = now - lastSeenAt;
+    const wentWhileDucking = lastDuckAt > 0 && lastSeenAt - lastDuckAt < 400;
+    if (lostFor > 1200) g.poseDuck = false;   // never slide forever on a lost pose
     if (now - lastSeenAt > 800) camStatus.textContent = "Can't see you — step back, upper body in frame";
     // nobody in frame is nobody at the keyboard either: hold the run
-    if (now - lastSeenAt > 2000) pauseGame('pose', 'Where did you go?');
+    if (lostFor > (wentWhileDucking ? 7000 : 2000)) pauseGame('pose', 'Where did you go?');
     return;
   }
   const [ls, rs, lh, rh] = [lm[11], lm[12], lm[23], lm[24]];
@@ -1290,8 +1327,17 @@ function handlePose(result, now) {
   }
 
   if (phase === 'calibrating') {
+    // Framing has to hold for the whole window, not just at the end — a
+    // baseline measured while drifting is worse than no baseline.
+    const fr = checkFraming(sCx, sShY, sHipY, sTorso);
+    framingOk = fr.ok; framingHint = fr.hint;
+    if (!fr.ok) {
+      calSamples.length = 0;
+      camStatus.textContent = fr.hint;
+      return;
+    }
     calSamples.push({ cx, hipY, shoulderY, torso });
-    camStatus.textContent = `Calibrating… ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
+    camStatus.textContent = `Hold still… ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
     if (calSamples.length >= 50) {
       baseCX = avg(calSamples.map(s => s.cx));
       baseHipY = avg(calSamples.map(s => s.hipY));
@@ -1308,6 +1354,10 @@ function handlePose(result, now) {
     return;
   }
   if (!calibrated) return;
+
+  // keep the framing readout live during play so drifting out is visible
+  const frLive = checkFraming(sCx, sShY, sHipY, sTorso);
+  framingOk = frLive.ok; framingHint = frLive.hint;
 
   const th = poseTh();
   const dt = Math.min(0.2, Math.max(0.008, (now - lastPoseAt) / 1000));
@@ -1397,6 +1447,30 @@ function drawCam(result) {
   camCtx.drawImage(video, 0, 0, w, h);
   camCtx.restore();
 
+  // Framing target. Solid and bright while calibrating (it is a thing to do),
+  // faint once running (it is only a reference).
+  const calibrating = phase === 'calibrating';
+  if (calibrating || calibrated) {
+    const bx = FRAME_BOX.x0 * w, by = FRAME_BOX.y0 * h;
+    const bw = (FRAME_BOX.x1 - FRAME_BOX.x0) * w, bh = (FRAME_BOX.y1 - FRAME_BOX.y0) * h;
+    camCtx.lineWidth = calibrating ? 2.5 : 1.5;
+    camCtx.strokeStyle = framingOk
+      ? (calibrating ? 'rgba(90,240,150,.95)' : 'rgba(90,240,150,.35)')
+      : (calibrating ? 'rgba(255,190,80,.95)' : 'rgba(255,190,80,.5)');
+    camCtx.setLineDash(framingOk ? [] : [7, 5]);
+    camCtx.strokeRect(bx, by, bw, bh);
+    camCtx.setLineDash([]);
+    if (calibrating && !framingOk && framingHint) {
+      camCtx.fillStyle = 'rgba(8,12,24,.8)';
+      camCtx.fillRect(0, h - 26, w, 26);
+      camCtx.fillStyle = '#ffbe50';
+      camCtx.font = '600 13px -apple-system, system-ui, sans-serif';
+      camCtx.textAlign = 'center';
+      camCtx.fillText(framingHint, w / 2, h - 8);
+      camCtx.textAlign = 'left';
+    }
+  }
+
   if (calibrated) {
     const th = poseTh();
     // lane boundaries — converted back out of torso units into frame x
@@ -1456,7 +1530,8 @@ window.__dbg = {
   startPlay, doJump, doDuck, setLane,
   music,
   // pose internals, so the detector can be driven with synthetic landmarks
-  handlePose, startCalibration, poseTh,
+  handlePose, startCalibration, poseTh, drawCam,
+  setVideo: v => { video = v; },
   poseBase: () => ({ baseHipY, baseShY, baseCX, baseTorso, calibrated, jumpArmed, hipsUsable }),
   setCalibrated: v => { calibrated = v; },
 };

@@ -33,7 +33,7 @@ Keyboard mode: ← → switch lanes, ↑ jump, ↓ slide. In camera mode press C
 
 You start with 3 hearts. Hitting something costs one heart, knocks that obstacle out of the way, and grants 1.4 s of invulnerability so a single train cannot drain the whole bar. 10 s of clean running restores one heart — the next heart to come back fills from the bottom in the HUD as you earn it. The run ends at zero hearts.
 
-Press `P` or `Esc` to pause (`Space` or a jump also resumes). The run also pauses itself when the window loses focus, and in camera mode when you have been out of frame for 2 s — stepping back into frame picks it up again.
+Press `P` or `Esc` to pause (`Space` or a jump also resumes). The run also pauses itself when the window loses focus, and in camera mode when you have been out of frame for 2 s — stepping back into frame picks it up again. Losing the pose *while crouching* gets a 7 s grace period instead: on a desk-height webcam a crouch often drops you out of frame entirely, and being accused of wandering off mid-slide is just wrong.
 
 Speed ramps from 14 to 36 over the first ~1700 m (about a minute), then keeps creeping toward 48 for as long as you stay alive, so surviving is always what makes it harder. A `SPEED UP` toast fires each time you cross a tier.
 
@@ -41,7 +41,8 @@ Tuning constants live at the top of the script: `MAX_HEARTS`, `REGEN_SECONDS`, `
 
 ## How the pose control works
 
-- A 2-second calibration records your baseline hip position and torso length (shoulder–hip distance)
+- Calibration asks you to stand inside a target box in the camera preview and holds for 2 seconds of *continuously* good framing — drift out and the count restarts, because a baseline measured while moving is worse than none. Thresholds are torso-scaled so distance never changes what a gesture *means*, but framing still decides how precisely it can be read: too far and the body covers too few pixels, so landmark noise grows relative to torso length; too close and limbs leave the frame and get guessed at; off to one side and there is no symmetric room left to step into.
+- It runs the `full` pose model rather than `lite`. A few MB more to download for noticeably steadier landmarks — the lite model's jitter was a real part of why the controls felt imprecise.
 - Every threshold is scaled by torso length, so it is invariant to how far you stand from the camera. They live in `poseTh()`:
   - **Jump** — hips rise `0.18 × torso` above baseline **and** are moving up faster than `0.55` torso lengths/second. Height alone is not enough; that is what stops slow drift from faking a jump. It must fall back near the baseline before it can fire again.
   - **Crouch** — the *larger* of the shoulder drop and the hip drop exceeds `0.19 × torso`. Watching hips alone missed bending forward at the waist, which is how a lot of people duck.
