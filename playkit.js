@@ -127,6 +127,19 @@ function createPlaykit(options) {
         await request("/auth/google", { method: "POST", body: JSON.stringify({ idToken }) })
       );
     },
+    /**
+     * Asks for a reset link. Resolves the same way whether or not the address
+     * has an account — the server deliberately doesn't say, so the UI can't
+     * either. Rejects only on a malformed address or rate limiting.
+     */
+    async requestPasswordReset(email) {
+      await parse(
+        await request("/auth/forgot-password", {
+          method: "POST",
+          body: JSON.stringify({ email })
+        })
+      );
+    },
     async logout() {
       try {
         await request("/auth/logout", { method: "POST" });

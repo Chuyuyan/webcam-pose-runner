@@ -1101,14 +1101,17 @@ function drawPickup(p, z) {
 function drawCat() {
   const c = g.cat;
   if (!c) return;
-  const near = Math.max(0, Math.min(1, 1 - c.gap / CAT_START_GAP));
+  // Scaled against the gap at which it gives up, not the gap it starts at:
+  // measuring from the start gap put it at exactly zero on frame one, so it
+  // stayed invisible until a stumble happened to pull it closer.
+  const near = clamp(1 - c.gap / CAT_MAX_GAP, 0, 1);
   if (near <= 0.02) return;
 
-  const z = -0.2 - near * 0.8;
+  const z = -0.15 - near * 0.85;
   const unit = UNIT(), pr = proj(z);
   const cx = screenX(g.renderX, z);
   const gy = groundY(z);
-  const s = unit * pr * (0.30 + near * 0.16);
+  const s = unit * pr * (0.16 + near * 0.34);
   const trot = g.dist * 3.4;
 
   ctx.save();
