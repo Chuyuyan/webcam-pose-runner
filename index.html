@@ -48,6 +48,18 @@
   #mute.muted .on { display: none; }
   #mute.muted .off { display: block; }
 
+  #coins {
+    display: flex; align-items: center; justify-content: flex-end; gap: 5px;
+    margin-top: 8px; font-size: 17px; font-weight: 800; color: var(--yellow);
+    font-variant-numeric: tabular-nums;
+  }
+  #coins svg { width: 15px; height: 15px; fill: var(--yellow); }
+
+  #boost {
+    margin-top: 6px; font-size: 12px; font-weight: 800; letter-spacing: 1.5px;
+    color: #5fd9bd; min-height: 15px; font-variant-numeric: tabular-nums;
+  }
+
   #toast {
     margin-top: 10px; font-size: 15px; font-weight: 800; letter-spacing: 2px;
     color: var(--yellow); opacity: 0;
@@ -167,6 +179,8 @@
   <div id="score">0</div>
   <div id="best"></div>
   <div id="hearts"></div>
+  <div id="coins"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg><span id="coin-n">0</span></div>
+  <div id="boost"></div>
   <div id="toast"></div>
 </div>
 
@@ -215,6 +229,8 @@ const bestEl = document.getElementById('best');
 const heartsEl = document.getElementById('hearts');
 const toastEl = document.getElementById('toast');
 const muteBtn = document.getElementById('mute');
+const coinEl = document.getElementById('coin-n');
+const boostEl = document.getElementById('boost');
 
 let W = 0, H = 0;
 function resize() {
@@ -263,6 +279,8 @@ const g = {
   duckUntil: 0,         // keyboard slide timer
   poseDuck: false,      // camera-mode crouch (held posture)
   obstacles: [], nextSpawn: 0,
+  pickups: [], nextPickup: 0,
+  coins: 0, bonus: 0, boost: 0,   // boost = seconds of high-jump left
   shake: 0, overAt: 0,
   hearts: MAX_HEARTS,
   invuln: 0,            // seconds of grace left after a hit
@@ -308,13 +326,19 @@ function resetGame() {
   g.dist = 0; g.speed = 14; g.score = 0;
   g.lane = 1; g.renderX = 0; g.jumpT = -1; g.duckUntil = 0;
   g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
+  g.pickups = []; g.nextPickup = 22;
+  g.coins = 0; g.bonus = 0; g.boost = 0;
   g.hearts = MAX_HEARTS; g.invuln = 0; g.regen = 0; g.hitFlash = 0;
   speedTier = 0;
   updateHearts();
+  coinEl.textContent = '0';
+  boostEl.textContent = '';
 }
 
 function isDucking() { return g.poseDuck || performance.now() < g.duckUntil; }
-function jumpHeight() { return g.jumpT >= 0 ? Math.sin(Math.PI * g.jumpT) * 1.5 : 0; }
+function jumpHeight() {
+  return g.jumpT >= 0 ? Math.sin(Math.PI * g.jumpT) * (g.boost > 0 ? 2.5 : 1.5) : 0;
+}
 
 function doJump() {
   if (phase === 'paused') { resumeGame(); return; }
@@ -405,6 +429,40 @@ function spawnPattern(d) {
   }
 }
 
+// ---------- Pickups ----------
+const BOOST_SECONDS = 7;
+
+// A lane is only free for a pickup if nothing solid overlaps that stretch —
+// otherwise coins end up buried inside a train, visible but unreachable.
+function laneFree(lane, d0, d1) {
+  return !g.obstacles.some(o =>
+    o.lane === lane && o.d < d1 + 1.5 && o.d + o.depth > d0 - 1.5);
+}
+
+function spawnPickups(d) {
+  const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
+  if (Math.random() < 0.24) {
+    // a single high-jump pickup
+    const lane = lanes.find(l => laneFree(l, d, d + 1));
+    if (lane === undefined) return;
+    g.pickups.push({ type: 'boost', lane, d, h: 1.0 });
+    return;
+  }
+  // a run of coins, sometimes arcing up so it pays to jump through it
+  const n = Math.floor(rand(5, 9));
+  const span = (n - 1) * 1.7;
+  const lane = lanes.find(l => laneFree(l, d, d + span));
+  if (lane === undefined) return;
+  const arc = Math.random() < 0.4;
+  for (let i = 0; i < n; i++) {
+    const t = n > 1 ? i / (n - 1) : 0;
+    g.pickups.push({
+      type: 'coin', lane, d: d + i * 1.7,
+      h: arc ? 0.6 + Math.sin(t * Math.PI) * 1.9 : 0.6,
+    });
+  }
+}
+
 // ---------- Main loop ----------
 let lastT = performance.now();
 function tick(now) {
@@ -437,8 +495,13 @@ function update(dt) {
   // longer is always what makes the run harder.
   g.speed = 14 + Math.min(22, g.dist * 0.013) + Math.min(12, Math.max(0, g.dist - 1700) * 0.002);
   g.dist += g.speed * dt;
-  g.score = Math.floor(g.dist);
+  g.score = Math.floor(g.dist) + g.bonus;
   scoreEl.textContent = g.score;
+
+  if (g.boost > 0) {
+    g.boost = Math.max(0, g.boost - dt);
+    boostEl.textContent = g.boost > 0 ? `HIGH JUMP ${g.boost.toFixed(1)}s` : '';
+  }
 
   const tier = Math.floor((g.speed - 14) / 6);
   if (tier > speedTier) { speedTier = tier; showToast('SPEED UP'); sfx.speedup(); }
@@ -457,13 +520,43 @@ function update(dt) {
   // keep obstacles until they have swept fully past the near clip plane
   g.obstacles = g.obstacles.filter(o => o.d + o.depth - g.dist > NEAR_CLIP);
 
+  // Pickups spawn after obstacles for this stretch, so laneFree() can see
+  // what is already there and never bury a coin inside a train.
+  if (g.dist + SPAWN_Z > g.nextPickup) {
+    spawnPickups(g.nextPickup + SPAWN_Z);
+    g.nextPickup += rand(13, 23);
+  }
+  g.pickups = g.pickups.filter(p => p.d - g.dist > NEAR_CLIP);
+
   if (g.jumpT >= 0) {
-    g.jumpT += dt / 0.62;
+    g.jumpT += dt / (g.boost > 0 ? 0.8 : 0.62);   // boosted jumps hang longer
     if (g.jumpT >= 1) { g.jumpT = -1; g.shake = Math.max(g.shake, 0.12); }
   }
 
   const target = LANES[g.lane];
   g.renderX += (target - g.renderX) * Math.min(1, dt * 11);
+
+  // pickups — reachable up to a bit above head height, so the arcs need a jump
+  const reach = jumpHeight() + 1.75;
+  for (let i = g.pickups.length - 1; i >= 0; i--) {
+    const p = g.pickups[i];
+    if (p.lane !== g.lane) continue;
+    const z = p.d - g.dist;
+    if (z > 0.9 || z < -0.9) continue;
+    if (Math.abs(LANES[g.lane] - g.renderX) > 0.9) continue;
+    if (p.h > reach) continue;
+    g.pickups.splice(i, 1);
+    if (p.type === 'coin') {
+      g.coins++; g.bonus += 5;
+      coinEl.textContent = g.coins;
+      sfx.coin();
+    } else {
+      g.boost = BOOST_SECONDS;
+      boostEl.textContent = `HIGH JUMP ${g.boost.toFixed(1)}s`;
+      showToast('HIGH JUMP');
+      sfx.power();
+    }
+  }
 
   // collisions (skipped entirely during the post-hit grace period)
   if (g.invuln <= 0) {
@@ -599,13 +692,22 @@ function render(now) {
     drawObstacle(o, z);
   }
 
+  // pickups, far to near, same behind/in-front split as the obstacles so one
+  // that slipped past uncollected sweeps over the player rather than under
+  for (const p of [...g.pickups].sort((a, b) => b.d - a.d)) {
+    const z = p.d - g.dist;
+    if (z > SPAWN_Z || z < NEAR_CLIP) continue;
+    if (z < 0) inFront.push([p, z, true]); else drawPickup(p, z);
+  }
+
   // blink through the grace period so being hit is unmistakable
   const blink = g.invuln > 0 && Math.floor(g.invuln * 14) % 2 === 0;
   if (blink) ctx.globalAlpha = 0.28;
   drawPlayer(now);
   ctx.globalAlpha = 1;
 
-  for (const [o, z] of inFront) drawObstacle(o, z);
+  inFront.sort((a, b) => b[1] - a[1]);
+  for (const [o, z, isPickup] of inFront) (isPickup ? drawPickup : drawObstacle)(o, z);
 
   // speed streaks at high speed
   if (phase === 'playing' && g.speed > 24) {
@@ -750,6 +852,45 @@ function drawObstacle(o, z) {
   ctx.beginPath(); ctx.arc(fx + fw * 0.3, fy - fh * 0.16, fw * 0.05, 0, 7); ctx.fill();
 }
 
+function drawPickup(p, z) {
+  const unit = UNIT(), pr = proj(z);
+  const cx = screenX(LANES[p.lane], z);
+  const cy = groundY(z) - p.h * unit * pr;
+
+  if (p.type === 'coin') {
+    const r = 0.32 * unit * pr;
+    // width oscillates to fake a spin; phase keyed off world position so a
+    // run of coins ripples rather than blinking in unison
+    const spin = Math.abs(Math.cos(g.dist * 1.5 + p.d * 0.8));
+    ctx.fillStyle = 'rgba(255,210,63,.22)';
+    ctx.beginPath(); ctx.arc(cx, cy, r * 1.5, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath(); ctx.ellipse(cx, cy, Math.max(1.2, r * spin), r, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.ellipse(cx, cy, Math.max(0.7, r * spin * 0.42), r * 0.48, 0, 0, 7); ctx.fill();
+    return;
+  }
+
+  // high-jump pickup: a glowing tile with a double chevron
+  const s = 0.62 * unit * pr;
+  const pulse = 1 + Math.sin(g.dist * 3 + p.d) * 0.06;
+  ctx.fillStyle = 'rgba(95,217,189,.25)';
+  ctx.beginPath(); ctx.arc(cx, cy, s * 1.15 * pulse, 0, 7); ctx.fill();
+  ctx.fillStyle = '#5fd9bd';
+  roundRect(cx - s / 2, cy - s / 2, s, s, s * 0.27);
+  ctx.fill();
+  ctx.strokeStyle = '#06202a';
+  ctx.lineWidth = Math.max(1.4, s * 0.12);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const off of [0.10, -0.14]) {
+    ctx.beginPath();
+    ctx.moveTo(cx - s * 0.23, cy + s * (0.16 + off));
+    ctx.lineTo(cx, cy - s * (0.10 - off));
+    ctx.lineTo(cx + s * 0.23, cy + s * (0.16 + off));
+    ctx.stroke();
+  }
+}
+
 function drawPlayer(now) {
   const unit = UNIT();
   const cx = screenX(g.renderX, 0);
@@ -850,6 +991,8 @@ const sfx = (() => {
     hit: () => { tone(320, 90, 0.28, 'square', 0.2); tone(180, 70, 0.22, 'sawtooth', 0.12); },
     heal: () => { tone(520, 900, 0.22, 'sine', 0.16); },
     speedup: () => tone(680, 1180, 0.2, 'triangle', 0.11),
+    coin: () => { tone(1050, 1550, 0.09, 'triangle', 0.13); tone(1580, 2100, 0.07, 'sine', 0.07); },
+    power: () => { tone(420, 720, 0.14, 'triangle', 0.15); tone(720, 1250, 0.22, 'triangle', 0.13); },
     crash: () => { tone(200, 45, 0.4, 'sawtooth', 0.25); tone(160, 40, 0.5, 'square', 0.15); },
     unlock: () => ensure(),
     ctx: () => ensure(),
@@ -1413,7 +1556,15 @@ function handlePose(result, now) {
     const limY = baseTorso * 0.6;
     baseHipY = clamp(baseHipY, calHipY - limY, calHipY + limY);
   }
-  if (jumpArmed && rise > th.jump && vUp > 0.55 &&
+  // Two ways in. The slow path waits for real height, which is unavoidably
+  // late: you have to physically rise ~9cm first, and a jump starts with a
+  // dip, so at the actual push-off `rise` is still negative. The fast path
+  // fires on the push-off itself. Running on the spot bobs at up to ~0.8
+  // torso/sec, while a real take-off reaches 3-4, so the gap is wide enough
+  // to trigger on speed alone without the position gate.
+  const tookOff = vUp > 1.8;
+  const roseEnough = rise > th.jump && vUp > 0.55;
+  if (jumpArmed && (tookOff || roseEnough) &&
       now - lastJumpAt > 380 && now - lastDuckAt > 300) {
     jumpArmed = false;
     lastJumpAt = now;
