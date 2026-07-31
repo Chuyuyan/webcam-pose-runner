@@ -104,6 +104,22 @@ function renderForm() {
   pw.autocomplete = 'current-password';
 
   const err = el('p', 'acct-error');
+  const forgot = el('button', 'acct-link', 'Forgot your password?');
+  forgot.type = 'button';
+  forgot.onclick = async () => {
+    err.textContent = '';
+    if (!email.value) { err.textContent = 'Enter your email first.'; return; }
+    try {
+      await pk.requestPasswordReset(email.value);
+      // Same wording whichever it is — the server does not say whether the
+      // address exists, and neither should this.
+      err.style.color = 'var(--cyan)';
+      err.textContent = 'If that address has an account, a reset link is on its way.';
+    } catch (e) {
+      err.textContent = e?.message || 'Could not send a reset link.';
+    }
+  };
+
   const actions = el('div', 'acct-actions');
   const submit = el('button', 'acct-submit', 'Go');
   submit.type = 'submit';
@@ -112,7 +128,7 @@ function renderForm() {
   cancel.onclick = renderBar;
   actions.append(submit, cancel);
 
-  form.append(tabs, googleSlot, email, pw, err, actions);
+  form.append(tabs, googleSlot, email, pw, err, actions, forgot);
 
   // Google renders its own button into the slot. If it can't load, the slot
   // stays empty and email sign-in is unaffected.
