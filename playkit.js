@@ -1,17 +1,20 @@
 // src/index.ts
 var PlaykitError = class extends Error {
+  status;
+  code;
   constructor(message, status, code) {
     super(message);
+    this.name = "PlaykitError";
     this.status = status;
     this.code = code;
-    this.name = "PlaykitError";
   }
 };
 var SaveConflictError = class extends PlaykitError {
+  currentVersion;
   constructor(message, currentVersion) {
     super(message, 409, "version_conflict");
-    this.currentVersion = currentVersion;
     this.name = "SaveConflictError";
+    this.currentVersion = currentVersion;
   }
 };
 function createPlaykit(options) {
