@@ -257,13 +257,27 @@ const UNIT = () => W * 0.115;                 // world unit → screen px at z=0
 const proj = z => NEAR / (NEAR + Math.max(z, -NEAR * 0.9));
 const horizonY = () => H * 0.40;
 const baseY = () => H * 0.94;
-const groundY = z => horizonY() + (baseY() - horizonY()) * proj(z);
+// Raising the camera by camY pushes everything on the ground *down* the
+// screen, by an amount that scales with proj — near things move a lot, distant
+// things barely, and the horizon not at all. That parallax is what sells the
+// lift; moving the whole image would just look like a pan.
+const groundY = z => horizonY() + (baseY() - horizonY() + camY * UNIT()) * proj(z);
 const screenX = (wx, z) => W / 2 + (wx - camX) * UNIT() * proj(z);
 
 // ---------- Camera ----------
 // The camera follows the player laterally (70%) and rolls a
 // little while switching lanes, so the view visibly shifts.
-let camX = 0, camRoll = 0, prevRX = 0;
+let camX = 0, camY = 0, camRoll = 0, prevRX = 0;
+
+// The camera follows only part of the player's height, and lags, so a jump
+// still reads as the player rising rather than the world simply dropping.
+function trackCamera(dt) {
+  camX += (g.renderX * 0.7 - camX) * Math.min(1, dt * 10);
+  camY += (g.y * 0.5 - camY) * Math.min(1, dt * 8);
+  const vx = dt > 0 ? (g.renderX - prevRX) / dt : 0;
+  prevRX = g.renderX;
+  camRoll += (clamp(vx * 0.012, -0.05, 0.05) - camRoll) * Math.min(1, dt * 8);
+}
 
 // ---------- Game state ----------
 // phase: menu | loading | calibrating | ready | playing | over
@@ -331,6 +345,7 @@ function resetGame() {
   g.dist = 0; g.speed = 14; g.score = 0;
   g.lane = 1; g.renderX = 0; g.duckUntil = 0;
   g.y = 0; g.vy = 0; g.grounded = true; g.surface = 0; g.riding = null;
+  camY = 0;
   g.boostCooldown = 25;   // not straight away either
   g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
   g.pickups = []; g.nextPickup = 22;
@@ -520,12 +535,7 @@ function tick(now) {
 
   decayFx(dt);
 
-  // camera follow + roll (runs in every phase so menus settle too)
-  camX += (g.renderX * 0.7 - camX) * Math.min(1, dt * 10);
-  const vx = dt > 0 ? (g.renderX - prevRX) / dt : 0;
-  prevRX = g.renderX;
-  const targetRoll = Math.max(-0.05, Math.min(0.05, vx * 0.012));
-  camRoll += (targetRoll - camRoll) * Math.min(1, dt * 8);
+  trackCamera(dt);   // runs in every phase so menus settle too
 
   render(now);
   requestAnimationFrame(tick);
@@ -1782,14 +1792,13 @@ window.__dbg = {
   set phase(p) { phase = p; },
   freeze() { phase = 'frozen'; render(performance.now()); },
   get camX() { return camX; },
+  get camY() { return camY; },
   get camRoll() { return camRoll; },
   step: (n = 1, dt = 1 / 60) => {
     for (let i = 0; i < n && phase === 'playing'; i++) {
       update(dt);
       decayFx(dt);
-      camX += (g.renderX * 0.7 - camX) * Math.min(1, dt * 10);
-      const vx = (g.renderX - prevRX) / dt; prevRX = g.renderX;
-      camRoll += (Math.max(-0.05, Math.min(0.05, vx * 0.012)) - camRoll) * Math.min(1, dt * 8);
+      trackCamera(dt);
     }
     render(performance.now());
   },

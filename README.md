@@ -31,6 +31,8 @@ Coins are worth 5 points each and sometimes arc overhead, so the run pays for ju
 
 Coins are kept out of solid obstacles from both directions. A lane is only used if nothing solid already overlaps that stretch, and because a coin run is up to twelve units long and a train generated afterwards can still land on top of one, buried pickups are swept out again every time new obstacles appear.
 
+The camera rises with you. It follows about half your height and lags behind, so a jump still reads as *you* going up rather than the world dropping away. Raising the camera pushes ground features down the screen by an amount that scales with their projection — the road under your feet swings out and down, distant buildings barely move, and the horizon holds still. That parallax is what sells the lift; translating the whole image would just look like a pan.
+
 The player has real vertical physics (gravity, velocity, and whatever surface is underfoot) rather than a fixed jump arc, which is what gives a train roof something to interrupt. A roof only holds you up if you came down onto it from above — without that check, sidestepping into the lane of a train already alongside you teleported you onto its roof instead of hitting its flank, which quietly made the game close to unloseable.
 
 Keyboard mode: ← → switch lanes, ↑ jump, ↓ slide. In camera mode press C to recalibrate.
