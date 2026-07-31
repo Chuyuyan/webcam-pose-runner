@@ -27,7 +27,9 @@ Note: `getUserMedia` requires HTTPS or localhost, so deploy behind HTTPS.
 | Yellow gate | Crouch and slide under |
 | Train | Switch lanes around it |
 
-Coins are worth 5 points each and sometimes arc overhead, so the run pays for jumping through it rather than around it. The teal double-chevron tile grants 7 seconds of **high jump** — higher and floatier, which clears anything. Neither ever spawns inside a train: a lane is only used if nothing solid overlaps that stretch.
+Coins are worth 5 points each and sometimes arc overhead, so the run pays for jumping through it rather than around it. The teal double-chevron tile grants 7 seconds of **high jump**, which peaks at 3.3 units — above the 2.7 roof of a train, so while it lasts you can **land on top of a train and ride it** until it runs out from under you. Neither pickup ever spawns inside a train: a lane is only used if nothing solid overlaps that stretch.
+
+The player has real vertical physics (gravity, velocity, and whatever surface is underfoot) rather than a fixed jump arc, which is what gives a train roof something to interrupt. A roof only holds you up if you came down onto it from above — without that check, sidestepping into the lane of a train already alongside you teleported you onto its roof instead of hitting its flank, which quietly made the game close to unloseable.
 
 Keyboard mode: ← → switch lanes, ↑ jump, ↓ slide. In camera mode press C to recalibrate.
 

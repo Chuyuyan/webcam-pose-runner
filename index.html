@@ -252,6 +252,7 @@ const SPAWN_Z = 70;
 // world z of the near clip plane: obstacles sweep past the player and are
 // dropped once they reach it (the camera sits at z = -NEAR)
 const NEAR_CLIP = -5;
+const TRAIN_W = 1.9, TRAIN_H = 2.7;
 const UNIT = () => W * 0.115;                 // world unit → screen px at z=0
 const proj = z => NEAR / (NEAR + Math.max(z, -NEAR * 0.9));
 const horizonY = () => H * 0.40;
@@ -275,12 +276,16 @@ const IFRAME_SECONDS = 1.4; // grace period after a hit
 const g = {
   dist: 0, speed: 0, score: 0,
   lane: 1, renderX: 0,
-  jumpT: -1,            // -1 = grounded, 0..1 = jump progress
+  y: 0, vy: 0,          // height above the road and vertical speed
+  grounded: true,
+  surface: 0,           // height of whatever is currently underfoot
+  riding: null,         // the train being stood on, if any
   duckUntil: 0,         // keyboard slide timer
   poseDuck: false,      // camera-mode crouch (held posture)
   obstacles: [], nextSpawn: 0,
   pickups: [], nextPickup: 0,
   coins: 0, bonus: 0, boost: 0,   // boost = seconds of high-jump left
+  lastBoostAt: -999,
   shake: 0, overAt: 0,
   hearts: MAX_HEARTS,
   invuln: 0,            // seconds of grace left after a hit
@@ -324,7 +329,9 @@ bestEl.textContent = best ? `BEST ${best}` : '';
 
 function resetGame() {
   g.dist = 0; g.speed = 14; g.score = 0;
-  g.lane = 1; g.renderX = 0; g.jumpT = -1; g.duckUntil = 0;
+  g.lane = 1; g.renderX = 0; g.duckUntil = 0;
+  g.y = 0; g.vy = 0; g.grounded = true; g.surface = 0; g.riding = null;
+  g.lastBoostAt = -999;
   g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
   g.pickups = []; g.nextPickup = 22;
   g.coins = 0; g.bonus = 0; g.boost = 0;
@@ -335,9 +342,26 @@ function resetGame() {
   boostEl.textContent = '';
 }
 
+// Real vertical physics rather than a fixed arc, so there is something for a
+// train roof to interrupt. Tuned to reproduce the old feel exactly: a plain
+// hop still peaks at 1.5 units after 0.31s and lands at 0.62s. A boosted one
+// clears TRAIN_H, which is the whole point of being able to get up there.
+const GRAVITY = 31.2;
+const JUMP_V = 9.68;
+const JUMP_V_BOOST = 14.35;   // peaks at 3.3, comfortably over a 2.7 roof
+
 function isDucking() { return g.poseDuck || performance.now() < g.duckUntil; }
-function jumpHeight() {
-  return g.jumpT >= 0 ? Math.sin(Math.PI * g.jumpT) * (g.boost > 0 ? 2.5 : 1.5) : 0;
+function jumpHeight() { return g.y; }
+
+// What is underfoot right now: a train roof if we are over one, else the road.
+function supportHeight() {
+  let s = 0, on = null;
+  for (const o of g.obstacles) {
+    if (o.type !== 'train' || o.lane !== g.lane) continue;
+    const z0 = o.d - g.dist;
+    if (z0 <= 0.2 && z0 + o.depth >= -0.2 && TRAIN_H > s) { s = TRAIN_H; on = o; }
+  }
+  return { h: s, on };
 }
 
 function doJump() {
@@ -348,12 +372,17 @@ function doJump() {
     return;
   }
   if (phase !== 'playing') return;
-  if (g.jumpT < 0) { g.jumpT = 0; g.duckUntil = 0; g.poseDuck = false; sfx.jump(); }
+  if (g.grounded) {
+    g.vy = g.boost > 0 ? JUMP_V_BOOST : JUMP_V;
+    g.grounded = false;
+    g.duckUntil = 0; g.poseDuck = false;
+    sfx.jump();
+  }
 }
 function doDuck() {
   if (phase !== 'playing') return;
   g.duckUntil = performance.now() + 750;
-  if (g.jumpT > 0.15) g.jumpT = Math.max(g.jumpT, 0.85); // air-dive: land fast
+  if (!g.grounded && g.vy > -6) g.vy = -14;   // air-dive: slam back down
   sfx.duck();
 }
 function setLane(l) {
@@ -441,11 +470,15 @@ function laneFree(lane, d0, d1) {
 
 function spawnPickups(d) {
   const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
-  if (Math.random() < 0.24) {
-    // a single high-jump pickup
+  // Rare, and never twice in quick succession. The gap has to be generous:
+  // pickup groups come every ~18 units and speed climbs as the run goes on,
+  // so a short one still left a 7-second high jump running about half the
+  // time — that is not a power-up, it is a permanent state.
+  if (d - g.lastBoostAt > 1400 && Math.random() < 0.3) {
     const lane = lanes.find(l => laneFree(l, d, d + 1));
     if (lane === undefined) return;
     g.pickups.push({ type: 'boost', lane, d, h: 1.0 });
+    g.lastBoostAt = d;
     return;
   }
   // a run of coins, sometimes arcing up so it pays to jump through it
@@ -528,10 +561,31 @@ function update(dt) {
   }
   g.pickups = g.pickups.filter(p => p.d - g.dist > NEAR_CLIP);
 
-  if (g.jumpT >= 0) {
-    g.jumpT += dt / (g.boost > 0 ? 0.8 : 0.62);   // boosted jumps hang longer
-    if (g.jumpT >= 1) { g.jumpT = -1; g.shake = Math.max(g.shake, 0.12); }
+  // vertical physics, landing on whatever is underfoot
+  const sup = supportHeight();
+  const prevY = g.y;
+  g.vy -= GRAVITY * dt;
+  g.y += g.vy * dt;
+
+  // A roof only holds you up if you came down onto it from above. Without
+  // this, sidestepping into the lane of a train already alongside you
+  // teleported you straight onto its roof instead of hitting its flank —
+  // which quietly made the whole game close to unloseable.
+  const canLand = sup.h === 0 || prevY >= sup.h - 0.05 || g.riding === sup.on;
+  const floor = canLand ? sup.h : 0;
+  g.surface = floor;
+  if (g.y <= floor) {
+    if (!g.grounded) {
+      g.shake = Math.max(g.shake, floor > 0 ? 0.25 : 0.12);
+      if (floor > 0) sfx.land();
+    }
+    g.y = floor; g.vy = 0; g.grounded = true;
+  } else {
+    g.grounded = false;
   }
+  // A train we are on top of — or clearing at roof height — has to be drawn
+  // before the player, or it would be painted over them from in front.
+  g.riding = (sup.on && canLand && g.y >= TRAIN_H - 0.3) ? sup.on : null;
 
   const target = LANES[g.lane];
   g.renderX += (target - g.renderX) * Math.min(1, dt * 11);
@@ -566,9 +620,11 @@ function update(dt) {
       const z0 = o.d - g.dist, z1 = z0 + o.depth;
       if (z1 < -0.4 || z0 > 0.9) continue;
       if (Math.abs(LANES[g.lane] - g.renderX) > 0.9) continue; // lenient mid-switch
+      // A train is only lethal if you hit its face. Come in over the roof
+      // line and you land on it instead — that is what a high jump buys you.
       if ((o.type === 'hurdle' && h < 0.55) ||
           (o.type === 'bar' && !duck && h < 0.1) ||
-          o.type === 'train') return takeHit(o);
+          (o.type === 'train' && h < TRAIN_H - 0.3)) return takeHit(o);
     }
   }
 }
@@ -678,26 +734,25 @@ function render(now) {
   // Far to near. Two obstacles at the same depth (side-by-side trains) must be
   // ordered by how far their lane sits from the camera, or the far one paints
   // over the near one and they appear to pass through each other.
-  const sorted = [...g.obstacles].sort((a, b) =>
-    (b.d - a.d) ||
-    (Math.abs(LANES[b.lane] - camX) - Math.abs(LANES[a.lane] - camX)));
+  // Obstacles and pickups share one depth sort. Drawing all of one kind and
+  // then all of the other let a distant coin paint straight over a near train.
+  const scene = [
+    ...g.obstacles.map(o => ({ it: o, pick: false })),
+    ...g.pickups.map(p => ({ it: p, pick: true })),
+  ].sort((a, b) =>
+    (b.it.d - a.it.d) ||
+    (Math.abs(LANES[b.it.lane] - camX) - Math.abs(LANES[a.it.lane] - camX)));
 
   // Anything whose nose is already past the player sits between the camera and
-  // the player, so it has to be painted over them, not under.
+  // the player, so it has to be painted over them, not under — except a train
+  // being ridden, which the player is standing on top of.
   const inFront = [];
-  for (const o of sorted) {
-    const z = o.d - g.dist;
-    if (z > SPAWN_Z || z + o.depth < NEAR_CLIP) continue;
-    if (z < 0) { inFront.push([o, z]); continue; }
-    drawObstacle(o, z);
-  }
-
-  // pickups, far to near, same behind/in-front split as the obstacles so one
-  // that slipped past uncollected sweeps over the player rather than under
-  for (const p of [...g.pickups].sort((a, b) => b.d - a.d)) {
-    const z = p.d - g.dist;
-    if (z > SPAWN_Z || z < NEAR_CLIP) continue;
-    if (z < 0) inFront.push([p, z, true]); else drawPickup(p, z);
+  for (const s of scene) {
+    const z = s.it.d - g.dist;
+    const back = s.pick ? z : z + s.it.depth;
+    if (z > SPAWN_Z || back < NEAR_CLIP) continue;
+    if (z < 0 && s.it !== g.riding) { inFront.push([s, z]); continue; }
+    (s.pick ? drawPickup : drawObstacle)(s.it, z);
   }
 
   // blink through the grace period so being hit is unmistakable
@@ -706,8 +761,7 @@ function render(now) {
   drawPlayer(now);
   ctx.globalAlpha = 1;
 
-  inFront.sort((a, b) => b[1] - a[1]);
-  for (const [o, z, isPickup] of inFront) (isPickup ? drawPickup : drawObstacle)(o, z);
+  for (const [s, z] of inFront) (s.pick ? drawPickup : drawObstacle)(s.it, z);
 
   // speed streaks at high speed
   if (phase === 'playing' && g.speed > 24) {
@@ -767,7 +821,7 @@ function drawObstacle(o, z) {
   // ---- train: a real box — roof + front + whichever side the camera can see
   // narrower than the 2.2 lane pitch so there is real clearance when you run
   // past one — otherwise the side wall is edge-on and its livery is unreadable
-  const TW = 1.9, TH = 2.7;
+  const TW = TRAIN_W, TH = TRAIN_H;
   // the nose may already be behind the player: clip it at the near plane so
   // the body keeps sweeping past instead of freezing in place
   const zF = Math.max(z, NEAR_CLIP), zB = z + o.depth;
@@ -896,23 +950,24 @@ function drawPlayer(now) {
   const cx = screenX(g.renderX, 0);
   const gy = groundY(0);
   const h = jumpHeight();
-  const duck = isDucking() && g.jumpT < 0;
+  const duck = isDucking() && g.grounded;
   const py = gy - h * unit;
   const runPhase = g.dist * 2.2;
 
-  // shadow
-  ctx.fillStyle = `rgba(0,0,0,${0.4 - h * 0.15})`;
+  // shadow, cast on whatever is underfoot rather than always on the road
+  const air = Math.max(0, h - g.surface);
+  ctx.fillStyle = `rgba(0,0,0,${0.4 - air * 0.15})`;
   ctx.beginPath();
-  ctx.ellipse(cx, gy - 3, unit * (0.55 - h * 0.1), unit * 0.11, 0, 0, 7);
+  ctx.ellipse(cx, gy - g.surface * unit - 3, unit * (0.55 - air * 0.1), unit * 0.11, 0, 0, 7);
   ctx.fill();
 
   const bodyH = duck ? 0.62 : 1.05, bodyW = duck ? 0.98 : 0.78;
   const legH = duck ? 0.18 : 0.42;
-  const bob = (phase === 'playing' && g.jumpT < 0 && !duck) ? Math.abs(Math.sin(runPhase)) * 0.07 : 0;
+  const bob = (phase === 'playing' && g.grounded && !duck) ? Math.abs(Math.sin(runPhase)) * 0.07 : 0;
   const yBase = py - bob * unit;
 
   // legs
-  if (g.jumpT >= 0) {
+  if (!g.grounded) {
     ctx.strokeStyle = '#2fb8ff'; ctx.lineWidth = unit * 0.13; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(cx - unit * 0.16, yBase - legH * unit);
     ctx.lineTo(cx - unit * 0.3, yBase - legH * unit + unit * 0.18); ctx.stroke();
@@ -993,6 +1048,7 @@ const sfx = (() => {
     speedup: () => tone(680, 1180, 0.2, 'triangle', 0.11),
     coin: () => { tone(1050, 1550, 0.09, 'triangle', 0.13); tone(1580, 2100, 0.07, 'sine', 0.07); },
     power: () => { tone(420, 720, 0.14, 'triangle', 0.15); tone(720, 1250, 0.22, 'triangle', 0.13); },
+    land: () => tone(240, 120, 0.12, 'sine', 0.16),
     crash: () => { tone(200, 45, 0.4, 'sawtooth', 0.25); tone(160, 40, 0.5, 'square', 0.15); },
     unlock: () => ensure(),
     ctx: () => ensure(),
@@ -1537,7 +1593,7 @@ function handlePose(result, now) {
   // in — it could never catch up: jumps then needed nearly double the height,
   // and past the crouch threshold you were stuck in a permanent slide with
   // no way back, because being stuck also blocked the adaptation.
-  if (Math.abs(vUp) < 0.35 && g.jumpT < 0) {
+  if (Math.abs(vUp) < 0.35 && g.grounded) {
     if (!postureStillSince) postureStillSince = now;
   } else postureStillSince = 0;
 
@@ -1601,7 +1657,7 @@ function handlePose(result, now) {
   }
 
   if (phase === 'playing') {
-    camStatus.textContent = g.poseDuck ? 'Slide' : (g.jumpT >= 0 ? 'Jump!' : ['Left lane', 'Center lane', 'Right lane'][g.lane]);
+    camStatus.textContent = g.poseDuck ? 'Slide' : (!g.grounded ? 'Jump!' : ['Left lane', 'Center lane', 'Right lane'][g.lane]);
   }
 }
 
