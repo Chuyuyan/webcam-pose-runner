@@ -43,7 +43,7 @@ You start with 3 hearts. Hitting something costs one heart, knocks that obstacle
 
 ## The chase
 
-Every so often a cat starts following you. Hitting an obstacle now costs pace as well as a heart — 20% slower for 1.8 s — and the cat only gains ground while you are slowed, so running clean is always safe and every stumble is what lets it close in. One stumble takes the gap from 9 to 3.3; a second one gets you caught. Being caught costs a heart and the cat, satisfied, wanders off. It does not end the run: a single mistake shouldn't be able to cascade straight into death. Stay clean and it gives up after 15 seconds.
+A cat is on your heels from the first stride, and comes back every so often after that. Hitting an obstacle now costs pace as well as a heart — 20% slower for 1.8 s — and the cat only gains ground while you are slowed, so running clean is always safe and every stumble is what lets it close in. One stumble takes the gap from 9 to 3.3; a second one gets you caught. Being caught costs a heart and the cat, satisfied, wanders off. It does not end the run: a single mistake shouldn't be able to cascade straight into death. Stay clean and it gives up after 15 seconds.
 
 The gap moves at fixed rates rather than as a fraction of your speed. Tying it to speed made the chase limp early in a run and vicious later, and it left the two numbers that actually matter — how long it takes to shake it, how much a stumble costs — impossible to set directly.
 

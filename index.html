@@ -310,6 +310,7 @@ const g = {
   pickups: [], nextPickup: 0,
   coins: 0, bonus: 0, boost: 0,   // boost = seconds of high-jump left
   boostCooldown: 0,
+  t: 0,                           // seconds of running, for animation phases
   slow: 0,                        // seconds of post-stumble slowdown left
   cat: null,                      // { gap, patience } while something chases
   catCooldown: 0,
@@ -363,8 +364,11 @@ function resetGame() {
   g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
   g.pickups = []; g.nextPickup = 22;
   g.coins = 0; g.bonus = 0; g.boost = 0;
-  g.slow = 0; g.cat = null; g.catCooldown = 30;
-  catEl.textContent = '';
+  // On your heels from the first stride — no quiet opening to settle into.
+  g.t = 0; g.slow = 0;
+  g.cat = { gap: CAT_START_GAP, patience: CAT_PATIENCE };
+  g.catCooldown = CAT_COOLDOWN;
+  catEl.innerHTML = 'CAT<span class="bar"><i style="width:0%"></i></span>';
   g.hearts = MAX_HEARTS; g.invuln = 0; g.regen = 0; g.hitFlash = 0;
   speedTier = 0;
   updateHearts();
@@ -635,6 +639,7 @@ function decayFx(dt) {
 function update(dt) {
   // Speed ramps quickly at first, then keeps creeping up forever, so surviving
   // longer is always what makes the run harder.
+  g.t += dt;
   const baseSpeed = 14 + Math.min(22, g.dist * 0.013) + Math.min(12, Math.max(0, g.dist - 1700) * 0.002);
   if (g.slow > 0) g.slow = Math.max(0, g.slow - dt);
   g.speed = baseSpeed * (g.slow > 0 ? SLOW_FACTOR : 1);
@@ -1037,9 +1042,11 @@ function drawPickup(p, z) {
 
   if (p.type === 'coin') {
     const r = 0.32 * unit * pr;
-    // width oscillates to fake a spin; phase keyed off world position so a
-    // run of coins ripples rather than blinking in unison
-    const spin = Math.abs(Math.cos(g.dist * 1.5 + p.d * 0.8));
+    // Width oscillates to fake a spin, offset per coin so a run ripples
+    // rather than blinking in unison. Keyed off elapsed time, not distance:
+    // on distance the coins spun faster the faster you ran, which at speed 30
+    // worked out to about seven flips a second.
+    const spin = Math.abs(Math.cos(g.t * 2.6 + p.d * 0.8));
     ctx.fillStyle = 'rgba(255,210,63,.22)';
     ctx.beginPath(); ctx.arc(cx, cy, r * 1.5, 0, 7); ctx.fill();
     ctx.fillStyle = '#ffd23f';
@@ -1051,7 +1058,7 @@ function drawPickup(p, z) {
 
   // high-jump pickup: a winged boot, beating as it hovers
   const s = 0.95 * unit * pr;
-  const beat = Math.sin(g.dist * 4 + p.d);
+  const beat = Math.sin(g.t * 7 + p.d);
   const lift = beat * s * 0.05;
 
   const halo = ctx.createRadialGradient(cx, cy, s * 0.1, cx, cy, s * 0.9);
