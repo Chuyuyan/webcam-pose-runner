@@ -184,9 +184,62 @@ function createPlaykit(options) {
     }
   };
 }
+var GSI_SRC = "https://accounts.google.com/gsi/client";
+var gsiPromise = null;
+function loadGoogleIdentity() {
+  if (gsiPromise) return gsiPromise;
+  gsiPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${GSI_SRC}"]`);
+    if (existing) {
+      if (window.google?.accounts?.id) return resolve();
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("Google script failed to load")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = GSI_SRC;
+    s.async = true;
+    s.defer = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Google script failed to load"));
+    document.head.appendChild(s);
+  });
+  return gsiPromise;
+}
+async function mountGoogleButton(pk, opts) {
+  if (!opts.clientId) return false;
+  try {
+    await loadGoogleIdentity();
+  } catch {
+    return false;
+  }
+  const google = window.google;
+  if (!google?.accounts?.id) return false;
+  google.accounts.id.initialize({
+    client_id: opts.clientId,
+    callback: async (response) => {
+      if (!response?.credential) return;
+      try {
+        opts.onSignedIn(await pk.loginWithGoogle(response.credential));
+      } catch (err) {
+        opts.onError?.(err);
+      }
+    }
+  });
+  google.accounts.id.renderButton(opts.container, {
+    type: "standard",
+    theme: opts.theme ?? "filled_black",
+    size: opts.size ?? "large",
+    text: "continue_with",
+    shape: "rectangular",
+    width: opts.width ?? 220
+  });
+  return true;
+}
 export {
   PlaykitError,
   SaveConflictError,
-  createPlaykit
+  createPlaykit,
+  mountGoogleButton
 };
 //# sourceMappingURL=playkit.js.map

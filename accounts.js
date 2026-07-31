@@ -9,7 +9,7 @@
  * Configure by setting <meta name="playkit-url" content="https://..."> in
  * index.html. Leave it empty to disable accounts entirely.
  */
-import { createPlaykit } from './playkit.js';
+import { createPlaykit, mountGoogleButton } from './playkit.js';
 
 const GAME_ID = 'webcam-pose-runner';
 const BOARD = 'distance';
@@ -17,6 +17,8 @@ const LOCAL_BEST_KEY = 'poseRunnerBest';
 
 const baseUrl =
   document.querySelector('meta[name="playkit-url"]')?.content?.trim() || '';
+const googleClientId =
+  document.querySelector('meta[name="google-client-id"]')?.content?.trim() || '';
 
 export const accountsEnabled = Boolean(baseUrl);
 
@@ -71,6 +73,7 @@ function renderForm() {
 
   const form = el('form', 'acct-form');
   const tabs = el('div', 'acct-tabs');
+  const googleSlot = el('div', 'acct-google');
   let mode = 'login';
 
   const loginTab = el('button', 'acct-tab is-on', 'Sign in');
@@ -109,7 +112,19 @@ function renderForm() {
   cancel.onclick = renderBar;
   actions.append(submit, cancel);
 
-  form.append(tabs, email, pw, err, actions);
+  form.append(tabs, googleSlot, email, pw, err, actions);
+
+  // Google renders its own button into the slot. If it can't load, the slot
+  // stays empty and email sign-in is unaffected.
+  if (googleClientId) {
+    mountGoogleButton(pk, {
+      clientId: googleClientId,
+      container: googleSlot,
+      onSignedIn: async (u) => { currentUser = u; renderBar(); await syncBest(); },
+      onError: () => { err.textContent = 'Google sign-in failed. Try email instead.'; },
+      width: 200,
+    });
+  }
   form.onsubmit = async (e) => {
     e.preventDefault();
     err.textContent = '';

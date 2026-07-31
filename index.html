@@ -8,6 +8,8 @@
      Set this to your playkit URL to enable cloud best scores and leaderboards.
      Webcam frames are never sent anywhere either way. -->
 <meta name="playkit-url" content="https://playkit.fly.dev">
+<!-- Google sign-in (optional). Empty = email sign-in only. Not a secret. -->
+<meta name="google-client-id" content="813381372044-482hc5987g820f217iq4hlnvkibvp4mg.apps.googleusercontent.com">
 <style>
   :root {
     --bg: #0b0e1a;
@@ -122,6 +124,9 @@
   }
   .acct-submit:disabled { opacity: .6; cursor: default; }
   .acct-error { margin: 0; font-size: 11px; color: var(--magenta); }
+
+  .acct-google { display: flex; justify-content: center; }
+  .acct-google:empty { display: none; }
 
   /* Leaderboard inside the game-over panel */
   .lb { margin-top: 16px; padding-top: 12px; border-top: 1px solid #2a3350;
