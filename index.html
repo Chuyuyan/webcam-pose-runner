@@ -285,7 +285,7 @@ const g = {
   obstacles: [], nextSpawn: 0,
   pickups: [], nextPickup: 0,
   coins: 0, bonus: 0, boost: 0,   // boost = seconds of high-jump left
-  lastBoostAt: -999,
+  boostCooldown: 0,
   shake: 0, overAt: 0,
   hearts: MAX_HEARTS,
   invuln: 0,            // seconds of grace left after a hit
@@ -331,7 +331,7 @@ function resetGame() {
   g.dist = 0; g.speed = 14; g.score = 0;
   g.lane = 1; g.renderX = 0; g.duckUntil = 0;
   g.y = 0; g.vy = 0; g.grounded = true; g.surface = 0; g.riding = null;
-  g.lastBoostAt = -999;
+  g.boostCooldown = 25;   // not straight away either
   g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
   g.pickups = []; g.nextPickup = 22;
   g.coins = 0; g.bonus = 0; g.boost = 0;
@@ -460,6 +460,7 @@ function spawnPattern(d) {
 
 // ---------- Pickups ----------
 const BOOST_SECONDS = 7;
+const BOOST_COOLDOWN = 75;   // seconds of run before another can appear
 
 // A lane is only free for a pickup if nothing solid overlaps that stretch —
 // otherwise coins end up buried inside a train, visible but unreachable.
@@ -468,17 +469,31 @@ function laneFree(lane, d0, d1) {
     o.lane === lane && o.d < d1 + 1.5 && o.d + o.depth > d0 - 1.5);
 }
 
+// laneFree can only see obstacles that already exist, and a coin run is up to
+// twelve units long, so a train generated afterwards can still land on top of
+// one — which is exactly how coins ended up showing through a train. Sweep
+// them back out whenever new obstacles appear.
+function pruneBuriedPickups() {
+  g.pickups = g.pickups.filter(p => !g.obstacles.some(o => {
+    if (o.lane !== p.lane) return false;
+    if (o.d - 1.2 >= p.d || o.d + o.depth + 1.2 <= p.d) return false;
+    if (o.type === 'train') return true;              // solid all the way up
+    if (o.type === 'hurdle') return p.h < 0.9;        // only the low ones
+    return p.h > 1.0 && p.h < 2.0;                    // inside a gate's bar
+  }));
+}
+
 function spawnPickups(d) {
   const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
-  // Rare, and never twice in quick succession. The gap has to be generous:
-  // pickup groups come every ~18 units and speed climbs as the run goes on,
-  // so a short one still left a 7-second high jump running about half the
-  // time — that is not a power-up, it is a permanent state.
-  if (d - g.lastBoostAt > 1400 && Math.random() < 0.3) {
+  // The cooldown is in seconds, not distance. A distance gate keeps shrinking
+  // in real terms as the run speeds up — the same 1400 units is 40 seconds
+  // early on and 29 at full tilt — which is why high jump kept creeping back
+  // to feeling constant however far the gate was pushed out.
+  if (g.boostCooldown <= 0 && Math.random() < 0.35) {
     const lane = lanes.find(l => laneFree(l, d, d + 1));
     if (lane === undefined) return;
     g.pickups.push({ type: 'boost', lane, d, h: 1.0 });
-    g.lastBoostAt = d;
+    g.boostCooldown = BOOST_COOLDOWN;
     return;
   }
   // a run of coins, sometimes arcing up so it pays to jump through it
@@ -531,6 +546,7 @@ function update(dt) {
   g.score = Math.floor(g.dist) + g.bonus;
   scoreEl.textContent = g.score;
 
+  if (g.boostCooldown > 0) g.boostCooldown = Math.max(0, g.boostCooldown - dt);
   if (g.boost > 0) {
     g.boost = Math.max(0, g.boost - dt);
     boostEl.textContent = g.boost > 0 ? `HIGH JUMP ${g.boost.toFixed(1)}s` : '';
@@ -549,6 +565,7 @@ function update(dt) {
   if (g.dist + SPAWN_Z > g.nextSpawn) {
     spawnPattern(g.nextSpawn + SPAWN_Z);
     g.nextSpawn += rand(17, 27);
+    pruneBuriedPickups();
   }
   // keep obstacles until they have swept fully past the near clip plane
   g.obstacles = g.obstacles.filter(o => o.d + o.depth - g.dist > NEAR_CLIP);
@@ -836,16 +853,24 @@ function drawObstacle(o, z) {
 
   // dark chassis spanning the whole train; the coupling gaps between cars are
   // simply where no car body gets painted over it
+  // Both walls, not just the one facing us. The far wall is barely visible,
+  // but without it the box is open on that side and anything beyond the train
+  // — a coin two lanes over — shows straight through it.
+  for (const wx of [xL, xR]) {
+    poly([
+      [screenX(wx, zF), groundY(zF)], [screenX(wx, zF), topY(zF)],
+      [screenX(wx, zB), topY(zB)], [screenX(wx, zB), groundY(zB)],
+    ], CHASSIS);
+  }
   poly([
     [screenX(xL, zF), topY(zF)], [screenX(xR, zF), topY(zF)],
     [screenX(xR, zB), topY(zB)], [screenX(xL, zB), topY(zB)],
   ], CHASSIS);
-  if (sideX !== null) {
-    poly([
-      [screenX(sideX, zF), groundY(zF)], [screenX(sideX, zF), topY(zF)],
-      [screenX(sideX, zB), topY(zB)], [screenX(sideX, zB), groundY(zB)],
-    ], CHASSIS);
-  }
+  // and the tail, so you cannot see into the box from behind either
+  poly([
+    [screenX(xL, zB), groundY(zB)], [screenX(xR, zB), groundY(zB)],
+    [screenX(xR, zB), topY(zB)], [screenX(xL, zB), topY(zB)],
+  ], CHASSIS);
 
   const nCars = Math.max(1, Math.round(o.depth / 3.2));
   const carLen = o.depth / nCars;
@@ -925,24 +950,42 @@ function drawPickup(p, z) {
     return;
   }
 
-  // high-jump pickup: a glowing tile with a double chevron
-  const s = 0.62 * unit * pr;
-  const pulse = 1 + Math.sin(g.dist * 3 + p.d) * 0.06;
-  ctx.fillStyle = 'rgba(95,217,189,.25)';
-  ctx.beginPath(); ctx.arc(cx, cy, s * 1.15 * pulse, 0, 7); ctx.fill();
-  ctx.fillStyle = '#5fd9bd';
-  roundRect(cx - s / 2, cy - s / 2, s, s, s * 0.27);
-  ctx.fill();
-  ctx.strokeStyle = '#06202a';
-  ctx.lineWidth = Math.max(1.4, s * 0.12);
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  for (const off of [0.10, -0.14]) {
-    ctx.beginPath();
-    ctx.moveTo(cx - s * 0.23, cy + s * (0.16 + off));
-    ctx.lineTo(cx, cy - s * (0.10 - off));
-    ctx.lineTo(cx + s * 0.23, cy + s * (0.16 + off));
-    ctx.stroke();
+  // high-jump pickup: a winged boot, beating as it hovers
+  const s = 0.95 * unit * pr;
+  const beat = Math.sin(g.dist * 4 + p.d);
+  const lift = beat * s * 0.05;
+
+  const halo = ctx.createRadialGradient(cx, cy, s * 0.1, cx, cy, s * 0.9);
+  halo.addColorStop(0, 'rgba(170,240,255,.34)');
+  halo.addColorStop(1, 'rgba(170,240,255,0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(cx, cy, s * 0.9, 0, 7); ctx.fill();
+
+  // a pair of wings sweeping back and up from the ankle, mirrored
+  for (const dir of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const spread = (0.30 + i * 0.19) * (1 + beat * 0.10);
+      ctx.fillStyle = ['#eaf9ff', '#c2ecff', '#9bdcf7'][i];
+      ctx.beginPath();
+      ctx.moveTo(cx + dir * s * 0.16, cy - s * 0.02 + lift);
+      ctx.quadraticCurveTo(
+        cx + dir * s * (0.20 + spread * 0.8), cy - s * (0.30 + i * 0.10) + lift,
+        cx + dir * s * (0.22 + spread), cy - s * (0.10 + i * 0.13) + lift);
+      ctx.quadraticCurveTo(
+        cx + dir * s * (0.30 + spread * 0.5), cy + s * 0.06 + lift,
+        cx + dir * s * 0.16, cy + s * 0.05 + lift);
+      ctx.closePath(); ctx.fill();
+    }
   }
+
+  // the boot itself
+  const bw = s * 0.34, bh = s * 0.30;
+  ctx.fillStyle = '#5fd9bd';
+  roundRect(cx - bw / 2, cy - s * 0.04 + lift, bw, bh, s * 0.07);
+  ctx.fill();
+  ctx.fillStyle = '#3fb89d';
+  roundRect(cx - bw / 2, cy + bh - s * 0.11 + lift, bw * 1.35, s * 0.10, s * 0.05);
+  ctx.fill();
 }
 
 function drawPlayer(now) {

@@ -27,7 +27,9 @@ Note: `getUserMedia` requires HTTPS or localhost, so deploy behind HTTPS.
 | Yellow gate | Crouch and slide under |
 | Train | Switch lanes around it |
 
-Coins are worth 5 points each and sometimes arc overhead, so the run pays for jumping through it rather than around it. The teal double-chevron tile grants 7 seconds of **high jump**, which peaks at 3.3 units — above the 2.7 roof of a train, so while it lasts you can **land on top of a train and ride it** until it runs out from under you. Neither pickup ever spawns inside a train: a lane is only used if nothing solid overlaps that stretch.
+Coins are worth 5 points each and sometimes arc overhead, so the run pays for jumping through it rather than around it. The winged boot grants 7 seconds of **high jump**, which peaks at 3.3 units — above the 2.7 roof of a train, so while it lasts you can **land on top of a train and ride it** until it runs out from under you. Its cooldown is measured in seconds rather than distance: a distance gate keeps shrinking in real terms as the run speeds up, which is why the pickup kept creeping back to feeling constant however far the gate was pushed out.
+
+Coins are kept out of solid obstacles from both directions. A lane is only used if nothing solid already overlaps that stretch, and because a coin run is up to twelve units long and a train generated afterwards can still land on top of one, buried pickups are swept out again every time new obstacles appear.
 
 The player has real vertical physics (gravity, velocity, and whatever surface is underfoot) rather than a fixed jump arc, which is what gives a train roof something to interrupt. A roof only holds you up if you came down onto it from above — without that check, sidestepping into the lane of a train already alongside you teleported you onto its roof instead of hitting its flank, which quietly made the game close to unloseable.
 
