@@ -41,6 +41,14 @@ Keyboard mode: ← → switch lanes, ↑ jump, ↓ slide. In camera mode press C
 
 You start with 3 hearts. Hitting something costs one heart, knocks that obstacle out of the way, and grants 1.4 s of invulnerability so a single train cannot drain the whole bar. 10 s of clean running restores one heart — the next heart to come back fills from the bottom in the HUD as you earn it. The run ends at zero hearts.
 
+## The chase
+
+Every so often a cat starts following you. Hitting an obstacle now costs pace as well as a heart — 20% slower for 1.8 s — and the cat only gains ground while you are slowed, so running clean is always safe and every stumble is what lets it close in. One stumble takes the gap from 9 to 3.3; a second one gets you caught. Being caught costs a heart and the cat, satisfied, wanders off. It does not end the run: a single mistake shouldn't be able to cascade straight into death. Stay clean and it gives up after 15 seconds.
+
+The gap moves at fixed rates rather than as a fraction of your speed. Tying it to speed made the chase limp early in a run and vicious later, and it left the two numbers that actually matter — how long it takes to shake it, how much a stumble costs — impossible to set directly.
+
+The camera sits 6 units behind you, so anything trailing by more than about 2 is literally behind it and cannot be projected at all. The cat's drawn depth is compressed into the sliver that *is* visible and its real distance is carried by its size and the HUD bar, so it looms into frame at your heels rather than being visible from far off.
+
 Press `P` or `Esc` to pause (`Space` or a jump also resumes). The run also pauses itself when the window loses focus, and in camera mode when you have been out of frame for 2 s — stepping back into frame picks it up again. Losing the pose *while crouching* gets a 7 s grace period instead: on a desk-height webcam a crouch often drops you out of frame entirely, and being accused of wandering off mid-slide is just wrong.
 
 Speed ramps from 14 to 36 over the first ~1700 m (about a minute), then keeps creeping toward 48 for as long as you stay alive, so surviving is always what makes it harder. A `SPEED UP` toast fires each time you cross a tier.
