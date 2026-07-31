@@ -1154,6 +1154,7 @@ let lastJumpAt = 0, lastSeenAt = 0;
 let sHipY = 0, sShY = 0, sCx = 0, sTorso = 0.25, poseSmoothed = false;
 let prevVY = 0, lastPoseAt = 0, lastDuckAt = 0, jumpArmed = true;
 let prevCx = 0, laneArmed = true, laneStillSince = 0;
+let postureStillSince = 0, duckSince = 0;
 
 // Landmark x is normalised by frame WIDTH and y by frame HEIGHT, so on a 4:3
 // feed a horizontal move reads 33% smaller than the same distance vertically.
@@ -1347,6 +1348,7 @@ function handlePose(result, now) {
       calibrated = true;
       prevVY = hipsUsable ? sHipY : sShY;
       prevCx = sCx; laneArmed = true; laneStillSince = 0;
+      postureStillSince = 0; duckSince = 0;
       lastPoseAt = now; jumpArmed = true; lastDuckAt = 0;
       setPhase('ready');
       camStatus.textContent = 'Calibrated';
@@ -1375,28 +1377,37 @@ function handlePose(result, now) {
   const shDrop = sShY - baseShY;
   const drop = hipsUsable ? Math.max(shDrop, sHipY - baseHipY) : shDrop;
   g.poseDuck = drop > th.duck;
-  if (g.poseDuck) lastDuckAt = now;
+  if (g.poseDuck) { lastDuckAt = now; if (!duckSince) duckSince = now; } else duckSince = 0;
 
-  // Adaptive baseline. Standing a little further from the camera makes you
-  // smaller and lifts your hips in frame; with a frozen baseline that drift
-  // alone used to cross the jump threshold. While you are settled, let the
-  // baseline creep toward where you actually are.
-  const settled = Math.abs(rise) < baseTorso * 0.12 && g.jumpT < 0 && !g.poseDuck;
-  if (settled) {
-    baseShY += (sShY - baseShY) * 0.02;
+  const vUp = (prevVY - vy) / dt / baseTorso;          // torso lengths / second
+  prevVY = vy;
+
+  // Adaptive baseline. "Where do you actually stand" is a question about
+  // whether you are moving, not about how close you are to the previous
+  // guess. Keying it off proximity meant that once you settled more than a
+  // hair below the baseline — relaxing out of the upright pose you calibrated
+  // in — it could never catch up: jumps then needed nearly double the height,
+  // and past the crouch threshold you were stuck in a permanent slide with
+  // no way back, because being stuck also blocked the adaptation.
+  if (Math.abs(vUp) < 0.35 && g.jumpT < 0) {
+    if (!postureStillSince) postureStillSince = now;
+  } else postureStillSince = 0;
+
+  if (postureStillSince && now - postureStillSince > 400) {
+    // Nobody holds a slide for seconds on end, so a crouch that old is a bad
+    // baseline rather than a real one: adapt out of it at full speed. A brief
+    // genuine slide only creeps, so it is never quietly absorbed.
+    const staleDuck = duckSince && now - duckSince > 2500;
+    const rate = (g.poseDuck && !staleDuck) ? 0.004 : 0.03;
+    baseShY += (sShY - baseShY) * rate;
     baseShY = clamp(baseShY, calShY - baseTorso * 0.6, calShY + baseTorso * 0.6);
-    if (hipsUsable) baseHipY += (sHipY - baseHipY) * 0.02;
+    if (hipsUsable) baseHipY += (sHipY - baseHipY) * rate;
     baseTorso += (sTorso - baseTorso) * 0.02;
     // Sideways re-centring is not done here — the step detector owns baseCX,
     // and a second source drifting it would fight the one-step-one-lane rule.
     const limY = baseTorso * 0.6;
     baseHipY = clamp(baseHipY, calHipY - limY, calHipY + limY);
   }
-
-  // Jump needs height *and* upward speed, so slow drift can never fake it.
-  // It also has to fall back near the baseline before it can fire again.
-  const vUp = (prevVY - vy) / dt / baseTorso;          // torso lengths / second
-  prevVY = vy;
   if (jumpArmed && rise > th.jump && vUp > 0.55 &&
       now - lastJumpAt > 380 && now - lastDuckAt > 300) {
     jumpArmed = false;
@@ -1533,6 +1544,12 @@ window.__dbg = {
   handlePose, startCalibration, poseTh, drawCam,
   setVideo: v => { video = v; },
   poseBase: () => ({ baseHipY, baseShY, baseCX, baseTorso, calibrated, jumpArmed, hipsUsable }),
+  poseSignals: () => ({
+    sHipY, sShY, sTorso, hipsUsable, jumpArmed,
+    rise: (hipsUsable ? baseHipY - sHipY : baseShY - sShY) / baseTorso,   // in torso units
+    drop: (hipsUsable ? Math.max(sShY - baseShY, sHipY - baseHipY) : sShY - baseShY) / baseTorso,
+    poseDuck: g.poseDuck, lastDuckAt, lastJumpAt,
+  }),
   setCalibrated: v => { calibrated = v; },
 };
 updateHearts();
