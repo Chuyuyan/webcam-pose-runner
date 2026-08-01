@@ -60,6 +60,26 @@
     color: #5fd9bd; min-height: 15px; font-variant-numeric: tabular-nums;
   }
 
+  #hud { transition: opacity .5s ease; }
+  #hud.dim { opacity: 0; }
+
+  .sum-title { font-size: 15px; font-weight: 800; letter-spacing: 5px; color: #7fd0e8; }
+  .sum-score {
+    font-size: 62px; font-weight: 800; line-height: 1.05; margin: 2px 0 2px;
+    font-variant-numeric: tabular-nums;
+    background: linear-gradient(90deg, var(--cyan), var(--magenta));
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sum-stats { display: flex; justify-content: center; gap: 34px; margin: 6px 0 4px; }
+  .sum-stats div { display: flex; flex-direction: column; gap: 3px; }
+  .sum-stats b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .sum-stats span { font-size: 10px; letter-spacing: 2px; color: #8fa6bd; }
+  .sum-new {
+    font-size: 12px; font-weight: 800; letter-spacing: 3px; color: var(--yellow);
+    margin-bottom: 10px; animation: toastFade 1.6s ease-out infinite;
+  }
+  .btn[disabled] { opacity: .35; cursor: default; transform: none; }
+
   #cat {
     margin-top: 6px; font-size: 12px; font-weight: 800; letter-spacing: 1.5px;
     color: #ff9a5c; min-height: 15px; display: flex; align-items: center;
@@ -104,6 +124,8 @@
     background: rgba(6,8,18,.72); backdrop-filter: blur(4px); z-index: 10;
   }
   #overlay.hidden { display: none; }
+  #overlay.summary { align-items: flex-end; background: none; backdrop-filter: none; }
+  #overlay.summary .panel { padding-bottom: 20px; padding-top: 0; }
 
   /* Optional accounts — hidden entirely when playkit isn't configured. */
   #account-bar {
@@ -119,34 +141,46 @@
     text-underline-offset: 3px;
   }
   .acct-link:hover { color: var(--cyan); }
-  .acct-form {
-    display: flex; flex-direction: column; gap: 7px; width: 210px;
-    padding: 12px; background: rgba(11, 14, 26, 0.96);
-    border: 1px solid #2a3350; border-radius: 10px;
+  .acct-backdrop {
+    position: fixed; inset: 0; z-index: 200;
+    display: grid; place-items: center; padding: 20px;
+    background: rgba(6, 8, 16, .78); backdrop-filter: blur(3px);
+    font-family: inherit;
   }
-  .acct-tabs { display: flex; gap: 4px; }
-  .acct-tab {
-    flex: 1; padding: 4px; font: inherit; font-size: 11px; cursor: pointer;
-    color: #8b93a7; background: transparent; border: 1px solid transparent;
-    border-radius: 6px;
+  .acct-dialog {
+    width: 100%; max-width: 330px; padding: 24px 22px 18px;
+    background: #12172a; border: 1px solid #2a3350; border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .65);
   }
-  .acct-tab.is-on { color: var(--cyan); border-color: #2a3350; background: #141a2e; }
-  .acct-input {
-    padding: 6px 8px; font: inherit; font-size: 12px; color: #e8ecf5;
-    background: #0b0e1a; border: 1px solid #2a3350; border-radius: 6px;
-  }
-  .acct-input:focus { outline: none; border-color: var(--cyan); }
-  .acct-actions { display: flex; align-items: center; gap: 8px; }
-  .acct-submit {
-    flex: 1; padding: 6px; font: inherit; font-size: 12px; font-weight: 700;
-    color: #0b0e1a; background: var(--cyan); border: none; border-radius: 6px;
-    cursor: pointer;
-  }
-  .acct-submit:disabled { opacity: .6; cursor: default; }
-  .acct-error { margin: 0; font-size: 11px; color: var(--magenta); }
-
+  .acct-title { margin: 0; font-size: 17px; font-weight: 800; color: #e8ecf5; }
+  .acct-sub { margin: 6px 0 16px; font-size: 12px; line-height: 1.5; color: #8b93a7; }
   .acct-google { display: flex; justify-content: center; }
   .acct-google:empty { display: none; }
+  .acct-or {
+    display: flex; align-items: center; gap: 8px; margin: 14px 0;
+    font-size: 10px; color: #8b93a7; text-transform: uppercase; letter-spacing: .08em;
+  }
+  .acct-or::before, .acct-or::after { content: ''; flex: 1; height: 1px; background: #2a3350; }
+  .acct-form { display: flex; flex-direction: column; gap: 8px; }
+  .acct-input {
+    padding: 9px 11px; font: inherit; font-size: 13px; color: #e8ecf5;
+    background: #0b0e1a; border: 1px solid #2a3350; border-radius: 10px;
+  }
+  .acct-input:focus { outline: none; border-color: var(--cyan); }
+  .acct-error { margin: 0; font-size: 11px; color: var(--magenta); }
+  .acct-error:empty, .acct-notice:empty { display: none; }
+  .acct-notice { margin: 0; font-size: 11px; line-height: 1.5; color: var(--cyan); }
+  .acct-primary {
+    margin-top: 2px; padding: 10px; font: inherit; font-size: 13px; font-weight: 700;
+    color: #0b0e1a; background: var(--cyan); border: none; border-radius: 10px; cursor: pointer;
+  }
+  .acct-primary:disabled { opacity: .6; cursor: default; }
+  .acct-switch { margin: 12px 0 0; font-size: 11px; color: #8b93a7; text-align: center; }
+  .acct-skip {
+    width: 100%; margin-top: 14px; padding: 8px; font: inherit; font-size: 12px;
+    color: #8b93a7; background: none; border: none; border-top: 1px solid #2a3350; cursor: pointer;
+  }
+  .acct-skip:hover { color: #e8ecf5; }
 
   /* Leaderboard inside the game-over panel */
   .lb { margin-top: 16px; padding-top: 12px; border-top: 1px solid #2a3350;
@@ -233,6 +267,7 @@ const camCtx = camCanvas.getContext('2d');
 const camStatus = document.getElementById('cam-status');
 const overlay = document.getElementById('overlay');
 const overlayContent = document.getElementById('overlay-content');
+const hud = document.getElementById('hud');
 const scoreEl = document.getElementById('score');
 const bestEl = document.getElementById('best');
 const heartsEl = document.getElementById('hearts');
@@ -308,6 +343,7 @@ const g = {
   poseDuck: false,      // camera-mode crouch (held posture)
   obstacles: [], nextSpawn: 0,
   pickups: [], nextPickup: 0,
+  scenery: [], nextScenery: 0,
   coins: 0, bonus: 0, boost: 0,   // boost = seconds of high-jump left
   boostCooldown: 0,
   t: 0,                           // seconds of running, for animation phases
@@ -363,6 +399,7 @@ function resetGame() {
   g.boostCooldown = 25;   // not straight away either
   g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
   g.pickups = []; g.nextPickup = 22;
+  g.scenery = []; g.nextScenery = 6;
   g.coins = 0; g.bonus = 0; g.boost = 0;
   // On your heels from the first stride — no quiet opening to settle into.
   g.t = 0; g.slow = 0;
@@ -401,10 +438,7 @@ function supportHeight() {
 function doJump() {
   if (phase === 'paused') { resumeGame(); return; }
   if (phase === 'ready') { startPlay(); return; }
-  if (phase === 'over') {
-    if (performance.now() - g.overAt > 900) { resetGame(); setPhase('playing'); sfx.jump(); }
-    return;
-  }
+  if (phase === 'summary') { restartRun(); return; }
   if (phase !== 'playing') return;
   if (g.grounded) {
     g.vy = g.boost > 0 ? JUMP_V_BOOST : JUMP_V;
@@ -456,18 +490,32 @@ function takeHit(o) {
 function clawHit() { if (g.invuln <= 0) loseHeart(); }
 
 function crash() {
-  phase = 'over'; g.overAt = performance.now(); g.shake = 1;
+  phase = 'summary'; g.overAt = performance.now(); g.shake = 1;
   g.cat = null; catEl.textContent = '';   // updateChase stops here, so clear it
   syncMusic();
   sfx.crash();
   if (g.score > best) { best = g.score; localStorage.setItem('poseRunnerBest', best); }
   bestEl.textContent = `BEST ${best}`;
+  summaryT = 0;
+  hud.classList.add('dim');
   showOverlay(`
-    <div class="big-msg">WIPEOUT!</div>
-    <div class="over-score">${g.score}</div>
-    <div class="sub">${mode === 'pose' ? 'Jump in place — or press Space — to run again' : 'Press Space to run again'}</div>
+    <div class="sum-title">RUN COMPLETE</div>
+    <div class="sum-score">${g.score}</div>
+    <div class="sum-stats">
+      <div><b>${Math.floor(g.dist)}</b><span>DISTANCE</span></div>
+      <div><b>${g.coins}</b><span>COINS</span></div>
+      <div><b>${best}</b><span>BEST</span></div>
+    </div>
+    ${g.score >= best && g.score > 0 ? '<div class="sum-new">NEW BEST</div>' : ''}
+    <button class="btn" id="btn-again" disabled>Run again</button>
+    <div class="sub" id="sum-hint">${mode === 'pose' ? 'or jump in place' : 'or press Space'}</div>
     <div id="lb-slot"></div>
-  `);
+  `, true);
+  const again = document.getElementById('btn-again');
+  again.onclick = () => restartRun();
+  // A beat before anything is accepted, so the wrap-up actually gets seen
+  // instead of being skipped by the key that was already being held down.
+  setTimeout(() => { if (phase === 'summary') again.disabled = false; }, SUMMARY_LOCK * 1000);
 
   // Cloud score + leaderboard, if accounts are on. Fire-and-forget: the
   // game-over screen is already up and must not wait on the network.
@@ -614,6 +662,234 @@ function updateChase(dt) {
   catEl.innerHTML = `CAT<span class="bar"><i style="width:${Math.round(closeness * 100)}%"></i></span>`;
 }
 
+// ---------- Run summary ----------
+// A separate turntable projection, not the game camera. Orbiting the real one
+// would swing half the world behind the near plane and fall apart; here the
+// robot is the only thing in the scene, so it can be built in body space and
+// rotated properly.
+const SUMMARY_LOCK = 1.4;     // seconds before input is accepted
+let summaryT = 0;
+
+function restartRun() {
+  if (phase !== 'summary' || summaryT < SUMMARY_LOCK) return;
+  hud.classList.remove('dim');
+  resetGame();
+  setPhase('playing');
+  sfx.jump();
+}
+
+function renderSummary(now) {
+  const cx = W / 2, floorY = H * 0.52;
+  const yaw = summaryT * 0.62;
+  const rise = Math.min(1, summaryT / 0.9);
+  const scale = H * (0.115 + 0.042 * rise) * (1 + Math.sin(summaryT * 0.5) * 0.02);
+
+  const bg = ctx.createRadialGradient(cx, floorY - H * 0.14, H * 0.04, cx, floorY, H * 0.85);
+  bg.addColorStop(0, '#221a3d'); bg.addColorStop(1, '#08060f');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+  // shaft of light, and the disc it lands on
+  ctx.save();
+  const beam = ctx.createLinearGradient(0, 0, 0, floorY);
+  beam.addColorStop(0, 'rgba(120,220,255,.16)');
+  beam.addColorStop(1, 'rgba(120,220,255,0)');
+  ctx.fillStyle = beam;
+  ctx.beginPath();
+  ctx.moveTo(cx - scale * 0.55, 0); ctx.lineTo(cx + scale * 0.55, 0);
+  ctx.lineTo(cx + scale * 1.5, floorY); ctx.lineTo(cx - scale * 1.5, floorY);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  for (const [rr, col] of [[1.55, 'rgba(67,232,255,.10)'], [1.25, 'rgba(67,232,255,.18)'], [1.0, 'rgba(67,232,255,.30)']]) {
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(cx, floorY, scale * rr, scale * rr * 0.26, 0, 0, 7); ctx.fill();
+  }
+
+  // motes drifting up through the beam
+  for (let i = 0; i < 26; i++) {
+    const ph = (summaryT * 0.16 + i * 0.137) % 1;
+    const sway = Math.sin(summaryT * 0.7 + i) * scale * 0.3;
+    const px = cx + ((i * 37 % 100) / 100 - 0.5) * scale * 2.2 + sway;
+    const py = floorY - ph * H * 0.62;
+    ctx.fillStyle = `rgba(160,240,255,${(1 - ph) * 0.5})`;
+    ctx.beginPath(); ctx.arc(px, py, scale * 0.022 * (1 - ph * 0.5), 0, 7); ctx.fill();
+  }
+
+  drawHeroRobot(cx, floorY, scale, yaw, summaryT, rise);
+}
+
+// Orthographic turntable: body-space (rx across, ry up, rz forward) rotated
+// about the vertical axis, with parts painted back to front by their depth.
+function drawHeroRobot(cx, cy, s, yaw, t, rise) {
+  const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+  // The entrance is alpha and a small drop, never a vertical squash — scaling
+  // the height by it collapsed the whole figure onto the floor line.
+  const lift = (1 - rise) * s * 0.5;
+  const px = (rx, rz) => cx + (rx * cosY + rz * sinY) * s;
+  const pz = (rx, rz) => -rx * sinY + rz * cosY;
+  const py = ry => cy - ry * s - lift;
+  ctx.save();
+  ctx.globalAlpha = rise;
+
+  const breath = Math.sin(t * 1.6) * 0.012;
+  const parts = [];
+  const add = (depth, fn) => parts.push({ depth, fn });
+
+  const CY = '#43e8ff', CY_D = '#2b9fc4', LEG = '#2fb8ff', LEG_D = '#1f7fb4';
+
+  // legs, planted apart
+  for (const side of [-1, 1]) {
+    const rx = side * 0.30;
+    add(pz(rx, 0), () => {
+      ctx.strokeStyle = pz(rx, 0) < 0 ? LEG_D : LEG;
+      ctx.lineWidth = s * 0.15; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(px(rx * 0.7, 0), py(0.62));
+      ctx.lineTo(px(rx, 0.05), py(0.28));
+      ctx.lineTo(px(rx * 1.15, -0.05), py(0.02));
+      ctx.stroke();
+    });
+  }
+
+  // torso
+  add(pz(0, 0), () => {
+    const w = s * 0.80, h = s * 0.72;
+    ctx.fillStyle = CY;
+    roundRect(px(0, 0) - w / 2, py(1.34 + breath), w, h, s * 0.20);
+    ctx.fill();
+    // the shaded side swaps as the body turns
+    ctx.fillStyle = 'rgba(0,0,0,.20)';
+    const sh = Math.max(0, -sinY) * w * 0.42 + Math.max(0, sinY) * 0;
+    if (sinY < 0) { roundRect(px(0, 0) - w / 2, py(1.34 + breath), sh, h, s * 0.20); ctx.fill(); }
+    else { roundRect(px(0, 0) + w / 2 - sinY * w * 0.42, py(1.34 + breath), sinY * w * 0.42, h, s * 0.20); ctx.fill(); }
+    ctx.fillStyle = 'rgba(255,255,255,.26)';
+    roundRect(px(-0.20, 0.2) - w * 0.10, py(1.24 + breath), w * 0.22, h * 0.52, s * 0.09);
+    ctx.fill();
+  });
+
+  // arms: one thrown up, one on the hip
+  add(pz(-0.44, 0), () => {
+    ctx.strokeStyle = pz(-0.44, 0) < 0 ? CY_D : CY;
+    ctx.lineWidth = s * 0.13; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(px(-0.40, 0), py(1.26 + breath));
+    ctx.lineTo(px(-0.62, 0.05), py(1.02));
+    ctx.lineTo(px(-0.34, 0.05), py(0.86));
+    ctx.stroke();
+  });
+  const punch = 1.92 + Math.sin(t * 1.6) * 0.05;
+  add(pz(0.44, 0), () => {
+    ctx.strokeStyle = pz(0.44, 0) < 0 ? CY_D : CY;
+    ctx.lineWidth = s * 0.13; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(px(0.40, 0), py(1.28 + breath));
+    ctx.lineTo(px(0.66, 0.05), py(1.60));
+    ctx.lineTo(px(0.52, 0.05), py(punch));
+    ctx.stroke();
+    ctx.fillStyle = pz(0.44, 0) < 0 ? CY_D : CY;
+    ctx.beginPath(); ctx.arc(px(0.52, 0.05), py(punch), s * 0.10, 0, 7); ctx.fill();
+  });
+
+  // head, with the visor only where it is actually facing us
+  add(pz(0, 0.1), () => {
+    const hr = s * 0.27, hyy = py(2.24 + breath), hxx = px(0, 0);
+    ctx.fillStyle = '#eef7ff';
+    ctx.beginPath(); ctx.arc(hxx, hyy, hr, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.14)';
+    ctx.beginPath();
+    ctx.arc(hxx, hyy, hr, Math.PI / 2 - yaw, Math.PI * 1.5 - yaw);
+    ctx.fill();
+    const face = Math.cos(yaw);
+    if (face > 0.04) {
+      const vw = hr * 1.24 * face, vx = px(0, 0.30);
+      ctx.fillStyle = '#132033';
+      roundRect(vx - vw / 2, hyy - hr * 0.36, vw, hr * 0.55, hr * 0.25);
+      ctx.fill();
+      ctx.fillStyle = CY;
+      const ew = vw * 0.19;
+      ctx.fillRect(vx - vw * 0.28, hyy - hr * 0.20, ew, hr * 0.22);
+      ctx.fillRect(vx + vw * 0.09, hyy - hr * 0.20, ew, hr * 0.22);
+    }
+  });
+
+  parts.sort((a, b) => a.depth - b.depth);
+  for (const p of parts) p.fn();
+  ctx.restore();
+}
+
+// ---------- Roadside scenery ----------
+// Placed beyond the kerb on both sides. The stretch of road decides what goes
+// there, so the run passes through blocks of city and stretches of park rather
+// than an even sprinkle of both.
+const VERGE = 4.4;
+
+function spawnScenery(d) {
+  const park = Math.sin(d * 0.0026) + Math.sin(d * 0.0007) > 0.55;
+  for (const side of [-1, 1]) {
+    if (Math.random() < 0.22) continue;                 // gaps in the row
+    const x = side * (VERGE + Math.random() * 5.5);
+    const seed = Math.random();
+    if (park || Math.random() < 0.28) {
+      g.scenery.push({ type: 'tree', d, x, seed,
+        h: rand(2.4, 4.6), r: rand(0.85, 1.5) });
+    } else {
+      g.scenery.push({ type: 'block', d, x, seed,
+        w: rand(1.8, 3.6), dep: rand(2.0, 4.5), h: rand(3.5, 13) });
+    }
+  }
+}
+
+function drawScenery(o, z, day) {
+  const unit = UNIT();
+  const zF = Math.max(z, NEAR_CLIP);
+  if (zF > SPAWN_Z) return;
+  const pF = proj(zF);
+
+  if (o.type === 'tree') {
+    const gx = screenX(o.x, zF), gyy = groundY(zF);
+    const th = o.h * unit * pF, tr = o.r * unit * pF;
+    ctx.fillStyle = mixCol('#241a2e', '#5a4232', day);
+    ctx.fillRect(gx - unit * pF * 0.10, gyy - th * 0.62, unit * pF * 0.20, th * 0.62);
+    const lit = mixCol('#1d3a34', '#4f9b4a', day);
+    const dark = mixCol('#132a26', '#316e30', day);
+    for (const [ox, oy, k, col] of [[-0.45, 0.06, 0.72, dark], [0.42, 0.10, 0.66, dark],
+                                     [0, -0.30, 1.0, lit], [-0.22, 0.22, 0.62, lit]]) {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(gx + ox * tr, gyy - th * 0.62 - tr * 0.55 + oy * tr, tr * k, 0, 7);
+      ctx.fill();
+    }
+    return;
+  }
+
+  // a block: the face toward the road, the face toward us, and the roof
+  const zB = zF + o.dep, pB = proj(zB);
+  const inner = o.x > 0 ? o.x - o.w / 2 : o.x + o.w / 2;
+  const outer = o.x > 0 ? o.x + o.w / 2 : o.x - o.w / 2;
+  const topY = (xx, zz) => groundY(zz) - o.h * unit * proj(zz);
+
+  poly([[screenX(inner, zF), groundY(zF)], [screenX(inner, zF), topY(inner, zF)],
+        [screenX(inner, zB), topY(inner, zB)], [screenX(inner, zB), groundY(zB)]],
+       mixCol('#1a1530', '#6a7590', day));
+  poly([[screenX(inner, zF), topY(0, zF)], [screenX(outer, zF), topY(0, zF)],
+        [screenX(outer, zB), topY(0, zB)], [screenX(inner, zB), topY(0, zB)]],
+       mixCol('#241d3e', '#8794ad', day));
+  const fw = o.w * unit * pF, fx = screenX(o.x, zF), fy = groundY(zF), fh = o.h * unit * pF;
+  ctx.fillStyle = mixCol('#2b2247', '#9aa6bd', day);
+  ctx.fillRect(fx - fw / 2, fy - fh, fw, fh);
+
+  // lit windows — a fixed grid per building, and fewer of them by day
+  const cols = Math.max(1, Math.round(o.w * 1.5)), rows = Math.max(1, Math.round(o.h * 0.8));
+  const wOn = mixCol('#ffd98a', '#c8d8ea', day);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const n = Math.sin((r * 12.9898 + c * 78.233 + o.seed * 43.7) * 43758.5453);
+    if ((n - Math.floor(n)) > (day > 0.4 ? 0.35 : 0.55)) continue;
+    ctx.fillStyle = wOn;
+    ctx.fillRect(fx - fw / 2 + fw * (c + 0.28) / cols, fy - fh + fh * (r + 0.25) / rows,
+                 fw / cols * 0.42, fh / rows * 0.42);
+  }
+}
+
 // ---------- Main loop ----------
 let lastT = performance.now();
 function tick(now) {
@@ -625,7 +901,12 @@ function tick(now) {
 
   trackCamera(dt);   // runs in every phase so menus settle too
 
-  render(now);
+  if (phase === 'summary') {
+    summaryT += dt;
+    renderSummary(now);
+  } else {
+    render(now);
+  }
   requestAnimationFrame(tick);
 }
 
@@ -679,6 +960,12 @@ function update(dt) {
     g.nextPickup += rand(13, 23);
   }
   g.pickups = g.pickups.filter(p => p.d - g.dist > NEAR_CLIP);
+
+  while (g.dist + SPAWN_Z > g.nextScenery) {
+    spawnScenery(g.nextScenery + SPAWN_Z);
+    g.nextScenery += rand(5, 11);
+  }
+  g.scenery = g.scenery.filter(o => o.d - g.dist > NEAR_CLIP);
 
   // vertical physics, landing on whatever is underfoot
   const sup = supportHeight();
@@ -749,6 +1036,55 @@ function update(dt) {
 }
 
 // ---------- Rendering ----------
+// ---------- Sky cycle ----------
+// One body crosses the sky, sinks, and comes back up as the other. A full
+// moon-then-sun cycle takes SKY_PERIOD of distance, so it turns over roughly
+// every couple of minutes of running rather than being scenery you never see.
+const SKY_PERIOD = 2400;
+
+function skyState() {
+  const cyc = ((g.dist / SKY_PERIOD) % 2 + 2) % 2;
+  const isSun = cyc >= 1;
+  const prog = isSun ? cyc - 1 : cyc;          // 0 rising, 1 setting
+  const alt = Math.sin(prog * Math.PI);        // 0 at the horizon, 1 overhead
+  return { isSun, prog, alt, dayness: isSun ? alt : 0 };
+}
+
+const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+function mixCol(a, b, t) {
+  t = clamp(t, 0, 1);
+  const A = hex(a), B = hex(b);
+  return `rgb(${Math.round(A[0] + (B[0] - A[0]) * t)},${Math.round(A[1] + (B[1] - A[1]) * t)},${Math.round(A[2] + (B[2] - A[2]) * t)})`;
+}
+
+function drawCelestial(sk, hy) {
+  const x = W * (0.10 + 0.80 * sk.prog) - camX * UNIT() * 0.10;
+  const y = hy - sk.alt * H * 0.34;
+  const r = H * (sk.isSun ? 0.055 : 0.048);
+
+  const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, r * 5);
+  const gc = sk.isSun ? '255,214,120' : '190,214,255';
+  glow.addColorStop(0, `rgba(${gc},.42)`);
+  glow.addColorStop(1, `rgba(${gc},0)`);
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(x, y, r * 5, 0, 7); ctx.fill();
+
+  if (sk.isSun) {
+    ctx.fillStyle = '#fff0b8';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,236,150,.55)';
+    ctx.beginPath(); ctx.arc(x, y, r * 1.35, 0, 7); ctx.fill();
+  } else {
+    ctx.fillStyle = '#e8eeff';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    // a few craters, so it is legibly a moon and not just a pale dot
+    ctx.fillStyle = 'rgba(150,165,200,.55)';
+    for (const [ox, oy, cr] of [[-0.32, -0.22, 0.20], [0.26, 0.10, 0.15], [-0.06, 0.34, 0.12]]) {
+      ctx.beginPath(); ctx.arc(x + ox * r, y + oy * r, cr * r, 0, 7); ctx.fill();
+    }
+  }
+}
+
 const buildings = [[], []];
 (function genSkyline() {
   let seed = 7;
@@ -793,20 +1129,24 @@ function render(now) {
   const unit = UNIT();
   const hy = horizonY();
 
-  // sky (oversized margins cover the rolled edges)
+  // ---- sky: one body orbits, and each time it dips under the horizon it
+  // comes back up as the other one. Everything else in the scene tints off
+  // `dayness`, so the whole world changes with it rather than just the disc.
+  const sk = skyState();
+  const day = sk.dayness;
+
   const sky = ctx.createLinearGradient(0, 0, 0, hy * 1.15);
-  sky.addColorStop(0, '#0b0e2a'); sky.addColorStop(0.62, '#2a1a5e'); sky.addColorStop(1, '#b03a8c');
+  sky.addColorStop(0, mixCol('#0b0e2a', '#4aa8e8', day));
+  sky.addColorStop(0.62, mixCol('#2a1a5e', '#93cdf0', day));
+  sky.addColorStop(1, mixCol('#b03a8c', '#ffd9a8', day));
   ctx.fillStyle = sky; ctx.fillRect(-90, -90, W + 180, hy * 1.15 + 90);
 
-  // sun glow (drifts opposite the camera for parallax)
-  const sunX = W * 0.5 - camX * unit * 0.18;
-  const sunG = ctx.createRadialGradient(sunX, hy, 8, sunX, hy, H * 0.24);
-  sunG.addColorStop(0, 'rgba(255,120,180,.9)'); sunG.addColorStop(1, 'rgba(255,120,180,0)');
-  ctx.fillStyle = sunG; ctx.beginPath(); ctx.arc(sunX, hy, H * 0.24, 0, 7); ctx.fill();
+  drawCelestial(sk, hy);
 
   // city silhouettes, two parallax layers
   for (let layer = 0; layer < 2; layer++) {
-    ctx.fillStyle = layer ? '#1b1440' : '#251a52';
+    ctx.fillStyle = mixCol(layer ? '#1b1440' : '#251a52',
+                           layer ? '#7c93bd' : '#93a8ce', day * 0.85);
     const off = (g.dist * (layer ? 2.4 : 5)) % 4000 + camX * (layer ? 12 : 22);
     for (const b of buildings[layer]) {
       let bx = b.x - off; if (bx < -300) bx += 4000;
@@ -815,10 +1155,17 @@ function render(now) {
     }
   }
 
+  // Roadside scenery sits on the ground plane but behind everything on the
+  // road, so it is drawn between the backdrop and the tarmac, far to near.
+  const scenerySorted = [...g.scenery].sort((a, b) => b.d - a.d);
+
   // ground
   const gnd = ctx.createLinearGradient(0, hy, 0, H);
-  gnd.addColorStop(0, '#171233'); gnd.addColorStop(1, '#0d0a20');
+  gnd.addColorStop(0, mixCol('#171233', '#4a5b46', day * 0.8));
+  gnd.addColorStop(1, mixCol('#0d0a20', '#2e3a2c', day * 0.8));
   ctx.fillStyle = gnd; ctx.fillRect(-90, hy, W + 180, H - hy + 90);
+
+  for (const o of scenerySorted) drawScenery(o, o.d - g.dist, day);
 
   // road
   poly([
@@ -1521,8 +1868,8 @@ window.addEventListener('keydown', e => {
     if (k === ' ' || k === 'ArrowUp' || k === 'w') resumeGame();
     return;
   }
-  if (phase === 'over') {
-    if (k === ' ' || k === 'ArrowUp' || k === 'w') doJump();
+  if (phase === 'summary') {
+    if (k === ' ' || k === 'ArrowUp' || k === 'w' || k === 'Enter') restartRun();
     return;
   }
   if (phase === 'ready' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', ' '].includes(k)) {
@@ -1537,7 +1884,11 @@ window.addEventListener('keydown', e => {
 });
 
 // ---------- Overlays ----------
-function showOverlay(html) { overlayContent.innerHTML = html; overlay.classList.remove('hidden'); }
+function showOverlay(html, summary) {
+  overlayContent.innerHTML = html;
+  overlay.classList.toggle('summary', !!summary);
+  overlay.classList.remove('hidden');
+}
 function hideOverlay() { overlay.classList.add('hidden'); }
 function setPhase(p) {
   phase = p;
@@ -2028,6 +2379,8 @@ window.__dbg = {
   get phase() { return phase; },
   set phase(p) { phase = p; },
   freeze() { phase = 'frozen'; render(performance.now()); },
+  get summaryT() { return summaryT; },
+  set summaryT(v) { summaryT = v; if (phase === 'summary') renderSummary(performance.now()); },
   get camX() { return camX; },
   get camY() { return camY; },
   get camRoll() { return camRoll; },

@@ -63,104 +63,154 @@ function renderBar() {
   }
 
   const open = el('button', 'acct-link', 'Sign in');
-  open.onclick = () => renderForm();
+  open.onclick = () => openDialog();
   bar.appendChild(open);
 }
 
-function renderForm() {
-  const bar = document.getElementById('account-bar');
-  bar.innerHTML = '';
+const DISMISS_KEY = 'poseRunnerAccountPromptDismissed';
+const wasDismissed = () => {
+  try { return localStorage.getItem(DISMISS_KEY) === '1'; } catch { return true; }
+};
+const rememberDismissed = () => {
+  try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* private mode */ }
+};
+
+/**
+ * The sign-in dialog.
+ *
+ * An offer, never a gate: it always carries "play without an account" and does
+ * not come back once dismissed. Shown once to first-time players, because a
+ * link in the corner of the screen went unnoticed.
+ */
+function openDialog() {
+  // One at a time: the bar's button stays clickable behind the backdrop, and
+  // stacking dialogs leaves an orphan behind whichever one is dismissed.
+  if (document.querySelector('.acct-backdrop')) return;
+
+  let mode = 'register';   // most first-timers need an account
+
+  const backdrop = el('div', 'acct-backdrop');
+  const dialog = el('div', 'acct-dialog');
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+
+  const title = el('h2', 'acct-title', 'Save your best run');
+  const sub = el('p', 'acct-sub',
+    'An account keeps your best score and puts you on the board. Entirely optional.');
+  const googleSlot = el('div', 'acct-google');
+  const orRow = el('div', 'acct-or');
+  orRow.appendChild(el('span', null, 'or'));
+  orRow.style.display = 'none';
 
   const form = el('form', 'acct-form');
-  const tabs = el('div', 'acct-tabs');
-  const googleSlot = el('div', 'acct-google');
-  let mode = 'login';
-
-  const loginTab = el('button', 'acct-tab is-on', 'Sign in');
-  const regTab = el('button', 'acct-tab', 'Create');
-  for (const t of [loginTab, regTab]) t.type = 'button';
-  loginTab.onclick = () => {
-    mode = 'login';
-    loginTab.className = 'acct-tab is-on';
-    regTab.className = 'acct-tab';
-  };
-  regTab.onclick = () => {
-    mode = 'register';
-    regTab.className = 'acct-tab is-on';
-    loginTab.className = 'acct-tab';
-  };
-  tabs.append(loginTab, regTab);
-
   const email = el('input', 'acct-input');
-  email.type = 'email';
-  email.placeholder = 'Email';
-  email.required = true;
-  email.autocomplete = 'email';
-
+  email.type = 'email'; email.placeholder = 'Email'; email.required = true; email.autocomplete = 'email';
   const pw = el('input', 'acct-input');
-  pw.type = 'password';
-  pw.placeholder = 'Password';
-  pw.required = true;
-  pw.autocomplete = 'current-password';
-
+  pw.type = 'password'; pw.placeholder = 'Password'; pw.required = true;
   const err = el('p', 'acct-error');
-  const forgot = el('button', 'acct-link', 'Forgot your password?');
-  forgot.type = 'button';
-  forgot.onclick = async () => {
+  const notice = el('p', 'acct-notice');
+  const primary = el('button', 'acct-primary', 'Create account');
+  primary.type = 'submit';
+  form.append(email, pw, err, notice, primary);
+
+  const forgotRow = el('p', 'acct-switch');
+  const forgotLink = el('button', 'acct-link', 'Forgot your password?');
+  forgotLink.type = 'button';
+  forgotRow.appendChild(forgotLink);
+  forgotRow.style.display = 'none';
+
+  const switchRow = el('p', 'acct-switch');
+  const switchText = el('span', null, 'Already have an account? ');
+  const switchLink = el('button', 'acct-link', 'Sign in');
+  switchLink.type = 'button';
+  switchRow.append(switchText, switchLink);
+
+  const skip = el('button', 'acct-skip', 'Play without an account');
+  skip.type = 'button';
+
+  const close = () => { rememberDismissed(); backdrop.remove(); renderBar(); };
+
+  function render() {
     err.textContent = '';
-    if (!email.value) { err.textContent = 'Enter your email first.'; return; }
-    try {
-      await pk.requestPasswordReset(email.value);
-      // Same wording whichever it is — the server does not say whether the
-      // address exists, and neither should this.
-      err.style.color = 'var(--cyan)';
-      err.textContent = 'If that address has an account, a reset link is on its way.';
-    } catch (e) {
-      err.textContent = e?.message || 'Could not send a reset link.';
-    }
-  };
-
-  const actions = el('div', 'acct-actions');
-  const submit = el('button', 'acct-submit', 'Go');
-  submit.type = 'submit';
-  const cancel = el('button', 'acct-link', 'Cancel');
-  cancel.type = 'button';
-  cancel.onclick = renderBar;
-  actions.append(submit, cancel);
-
-  form.append(tabs, googleSlot, email, pw, err, actions, forgot);
-
-  // Google renders its own button into the slot. If it can't load, the slot
-  // stays empty and email sign-in is unaffected.
-  if (googleClientId) {
-    mountGoogleButton(pk, {
-      clientId: googleClientId,
-      container: googleSlot,
-      onSignedIn: async (u) => { currentUser = u; renderBar(); await syncBest(); },
-      onError: () => { err.textContent = 'Google sign-in failed. Try email instead.'; },
-      width: 200,
-    });
+    notice.textContent = '';
+    primary.disabled = false;
+    const forgot = mode === 'forgot';
+    title.textContent = forgot ? 'Reset your password' : 'Save your best run';
+    sub.textContent = forgot
+      ? "Enter the email you signed up with and we'll send a link to set a new password."
+      : 'An account keeps your best score and puts you on the board. Entirely optional.';
+    pw.style.display = forgot ? 'none' : '';
+    pw.required = !forgot;
+    pw.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+    googleSlot.style.display = forgot ? 'none' : '';
+    orRow.style.display = forgot || !googleSlot.hasChildNodes() ? 'none' : '';
+    primary.textContent = forgot ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Sign in';
+    forgotRow.style.display = mode === 'login' ? '' : 'none';
+    switchText.textContent =
+      mode === 'register' ? 'Already have an account? ' : mode === 'login' ? 'New here? ' : '';
+    switchLink.textContent =
+      mode === 'register' ? 'Sign in' : mode === 'forgot' ? 'Back to sign in' : 'Create one';
+    email.focus();
   }
+
+  switchLink.onclick = () => {
+    mode = mode === 'register' ? 'login' : mode === 'forgot' ? 'login' : 'register';
+    render();
+  };
+  forgotLink.onclick = () => { mode = 'forgot'; render(); };
+  skip.onclick = close;
+
   form.onsubmit = async (e) => {
     e.preventDefault();
     err.textContent = '';
-    submit.disabled = true;
+    notice.textContent = '';
+    primary.disabled = true;
     try {
+      if (mode === 'forgot') {
+        await pk.requestPasswordReset(email.value);
+        // Same wording whichever it is — the server does not say whether the
+        // address exists, and neither should this.
+        notice.textContent = 'If that address has an account, a reset link is on its way.';
+        return;
+      }
       currentUser =
         mode === 'register'
           ? await pk.register(email.value, pw.value)
           : await pk.login(email.value, pw.value);
+      rememberDismissed();
+      backdrop.remove();
       renderBar();
       await syncBest();
     } catch (e2) {
-      err.textContent = e2?.message || 'Sign-in failed.';
-      submit.disabled = false;
+      err.textContent = e2?.message || 'Something went wrong. Try again.';
+      primary.disabled = false;
     }
   };
 
-  bar.appendChild(form);
-  email.focus();
+  dialog.append(title, sub, googleSlot, orRow, form, forgotRow, switchRow, skip);
+  backdrop.appendChild(dialog);
+  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });
+  document.body.appendChild(backdrop);
+
+  if (googleClientId) {
+    mountGoogleButton(pk, {
+      clientId: googleClientId,
+      container: googleSlot,
+      onSignedIn: async (u) => {
+        currentUser = u;
+        rememberDismissed();
+        backdrop.remove();
+        renderBar();
+        await syncBest();
+      },
+      onError: () => { err.textContent = 'Google sign-in failed. Try email instead.'; },
+      width: 260,
+    }).then(() => render());
+  }
+
+  render();
 }
+
 
 // ---------- Score sync ----------
 
@@ -235,7 +285,9 @@ export async function initAccounts(onBest) {
   try {
     currentUser = await pk.restore();
     renderBar();
-    await syncBest();
+    if (currentUser) await syncBest();
+    // First-time players get the offer once; everyone else is left alone.
+    else if (!wasDismissed()) openDialog();
   } catch {
     // Not signed in, or the service is unreachable.
   }
