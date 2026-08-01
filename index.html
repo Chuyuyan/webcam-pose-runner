@@ -2001,6 +2001,8 @@ let lastJumpAt = 0, lastSeenAt = 0;
 // smoothed landmark signals + jump state machine
 let sHipY = 0, sShY = 0, sCx = 0, sTorso = 0.25, poseSmoothed = false;
 let prevVY = 0, lastPoseAt = 0, lastDuckAt = 0, jumpArmed = true;
+let sRawV = null, sRawC = null, sVUp = 0, jumpHold = 0;
+const swBuf = new Array(5).fill(0); let swIdx = 0;
 let prevCx = 0, laneArmed = true, laneStillSince = 0;
 let postureStillSince = 0, duckSince = 0;
 
@@ -2041,10 +2043,11 @@ function checkFraming(cxNow, shY, hipY, swNow) {
 // nothing here moves when the player does.
 function poseTh() {
   return {
-    // A normal in-place hop lifts the body about a fifth of a shoulder width,
-    // and the smoothing filter shaves the peak further, so this sits under
-    // that. Upward speed, not height, is what keeps drift from faking a jump.
-    jump: 0.21,
+    // Measured: a vigorous run-in-place bob peaks at about 0.21 shoulder-widths
+    // and a real hop clears 0.6, so this sits between them. Putting it on top
+    // of the bob is what made jogging on the spot fire a jump every few
+    // seconds. Speed, not height, does the work for quick hops.
+    jump: 0.32,
     // The larger of the shoulder and hip drop, so a forward bend at the waist
     // counts too — that is how a lot of people actually duck.
     duck: 0.24,
@@ -2103,7 +2106,8 @@ async function startPoseMode() {
 
 function startCalibration() {
   calibrated = false; calSamples = [];
-  poseSmoothed = false; jumpArmed = true; laneArmed = true; laneStillSince = 0;
+  poseSmoothed = false; sRawV = null; sRawC = null; sVUp = 0; jumpHold = 0; swIdx = 0;
+  jumpArmed = true; laneArmed = true; laneStillSince = 0;
   phase = 'calibrating';
   showOverlay(`<div class="big-msg">Line yourself up</div><div class="sub">Step into the box in the camera preview, top left, and stand upright.<br>The box turns green when your framing is good — hold it for 2 seconds.<br>Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.</div>`);
 }
@@ -2142,6 +2146,14 @@ function handlePose(result, now) {
   const hipVis = Math.min(lh.visibility ?? 1, rh.visibility ?? 1);
   if (shVis < 0.5) { camStatus.textContent = 'Keep your upper body in frame'; return; }
   hipsUsable = hipVis >= 0.6;
+  // Coming back from a dropout, the previous sample is stale: differentiating
+  // against it manufactures an enormous velocity and fires a jump the instant
+  // you are seen again. Resync and hold the trigger for a moment.
+  if (now - lastSeenAt > 250) {
+    sRawV = null; sRawC = null; sVUp = 0; jumpHold = 0;
+    jumpArmed = false; laneArmed = false; laneStillSince = 0;
+    lastPoseAt = now;
+  }
   lastSeenAt = now;
   // back in frame: pick the run up again (only if losing you is what paused it)
   if (phase === 'paused' && autoPauseReason === 'pose') resumeGame();
@@ -2161,9 +2173,6 @@ function handlePose(result, now) {
   // what crouching looks like to a detector watching raw positions. Under this
   // normalisation both the offset and the scale shrink by the same factor when
   // you move, and cancel; a real crouch moves the body but not the width.
-  const shoulderN = ((ls.y + rs.y) / 2 - 0.5) / sw;
-  const hipN = ((lh.y + rh.y) / 2 - 0.5) / sw;
-
   // Mirrored coords: mx=0 is the left of the mirrored view (player's left).
   // Shoulders are weighted over hips because leaning — the quick, natural way
   // to change lanes — swings the shoulders while the hips barely move; an even
@@ -2171,22 +2180,46 @@ function handlePose(result, now) {
   const shoulderMid = 1 - (ls.x + rs.x) / 2;
   const hipMid = 1 - (lh.x + rh.x) / 2;
   const cxRaw = hipsUsable ? shoulderMid * 0.62 + hipMid * 0.38 : shoulderMid;
-  const cx = (cxRaw - 0.5) * aspect / sw;
 
-  // Light smoothing: the model jitters by a few pixels frame to frame and a
-  // single spike used to be enough to fire a jump. `sw` gets the same light
-  // filter, not a slow one — it has to track the current scale or a quick step
-  // backwards would desync it from the offsets and reintroduce the bug.
+  // The scale gets a much heavier filter than the offsets. Real distance
+  // changes take half a second or more; shoulder-width jitter is per-frame,
+  // and since every signal is *divided* by this number its noise lands
+  // straight on top of them.
+  // Median of the last five samples, then a light average. Every signal is
+  // *divided* by this, so a single bad frame here lands on all of them at
+  // once; a median throws spikes away outright, where an average — however
+  // slow — folds them in and then lags behind real movement as the price.
+  swBuf[swIdx % swBuf.length] = sw; swIdx++;
+  const swSorted = swBuf.slice(0, Math.min(swIdx, swBuf.length)).sort((a, b) => a - b);
+  const swMed = swSorted[swSorted.length >> 1];
+  if (!poseSmoothed) sTorso = swMed;
+  else sTorso += (swMed - sTorso) * 0.25;
+  const scale = Math.max(0.04, sTorso);
+
+  const shoulderN = ((ls.y + rs.y) / 2 - 0.5) / scale;
+  const hipN = ((lh.y + rh.y) / 2 - 0.5) / scale;
+  const cx = (cxRaw - 0.5) * aspect / scale;
+
+  // Light smoothing on the offsets: the model jitters by a few pixels frame to
+  // frame and a single spike used to be enough to fire a jump.
   if (!poseSmoothed) {
-    sHipY = hipN; sShY = shoulderN; sCx = cx; sTorso = sw;
-    prevVY = hipsUsable ? hipN : shoulderN;
+    sHipY = hipN; sShY = shoulderN; sCx = cx;
     poseSmoothed = true;
   } else {
     sHipY += (hipN - sHipY) * 0.6;
     sShY += (shoulderN - sShY) * 0.6;
     sCx += (cx - sCx) * 0.6;
-    sTorso += (sw - sTorso) * 0.5;
   }
+
+  // Velocities are differentiated from the *raw* positions and only then
+  // divided by the scale. Differentiating the ratio instead pulls in a
+  // d(scale)/dt term that scales with how far you sit from the optical axis —
+  // a 1% wobble in shoulder width was manufacturing a take-off.
+  const rawV = hipsUsable ? (lh.y + rh.y) / 2 : (ls.y + rs.y) / 2;
+  const rawVs = sRawV === null ? rawV : sRawV + (rawV - sRawV) * 0.6;
+  sRawV = rawVs;
+  const rawCs = sRawC === null ? cxRaw : sRawC + (cxRaw - sRawC) * 0.6;
+  sRawC = rawCs;
 
   if (phase === 'calibrating') {
     // Framing has to hold for the whole window, not just at the end — a
@@ -2207,8 +2240,7 @@ function handlePose(result, now) {
       baseTorso = avg(calSamples.map(s => s.torso));
       calHipY = baseHipY; calShY = baseShY; calCX = baseCX;
       calibrated = true;
-      prevVY = hipsUsable ? sHipY : sShY;
-      prevCx = sCx; laneArmed = true; laneStillSince = 0;
+      prevVY = rawVs; prevCx = rawCs; laneArmed = true; laneStillSince = 0;
       postureStillSince = 0; duckSince = 0;
       lastPoseAt = now; jumpArmed = true; lastDuckAt = 0;
       setPhase('ready');
@@ -2240,8 +2272,13 @@ function handlePose(result, now) {
   g.poseDuck = drop > th.duck;
   if (g.poseDuck) { lastDuckAt = now; if (!duckSince) duckSince = now; } else duckSince = 0;
 
-  const vUp = (prevVY - vy) / dt;                      // shoulder-widths / second
-  prevVY = vy;
+  const vUpRaw = (prevVY - rawVs) / dt / scale;       // shoulder-widths / second
+  prevVY = rawVs;
+  // A real take-off holds its speed for several frames; landmark noise spikes
+  // for one. Gating on the smoothed value keeps the take-off well clear of the
+  // threshold while halving anything that only lasts a frame.
+  sVUp += (vUpRaw - sVUp) * 0.5;
+  const vUp = sVUp;
 
   // Adaptive baseline. "Where do you actually stand" is a question about
   // whether you are moving, not about how close you are to the previous
@@ -2274,11 +2311,18 @@ function handlePose(result, now) {
   // fires on the push-off itself. Running on the spot bobs at up to ~0.8
   // torso/sec, while a real take-off reaches 3-4, so the gap is wide enough
   // to trigger on speed alone without the position gate.
-  const tookOff = vUp > 2.0;
+  // Measured: a vigorous run-in-place bob peaks around 2.1 shoulder-widths/sec
+  // and a real hop around 4.2, so the gate sits between them rather than on
+  // top of the bob.
+  const tookOff = vUp > 2.9;
   const roseEnough = rise > th.jump && vUp > 0.62;
-  if (jumpArmed && (tookOff || roseEnough) &&
+  // Hold for two frames before firing. A noise-driven crossing lasts one; a
+  // real take-off lasts many. Costs 33ms and removes the last of the
+  // false jumps that survived every threshold change.
+  if (tookOff || roseEnough) jumpHold++; else jumpHold = 0;
+  if (jumpArmed && jumpHold >= 2 &&
       now - lastJumpAt > 380 && now - lastDuckAt > 300) {
-    jumpArmed = false;
+    jumpArmed = false; jumpHold = 0;
     lastJumpAt = now;
     doJump();
   }
@@ -2288,27 +2332,37 @@ function handlePose(result, now) {
   // happen to be standing. Mapping absolute position onto a lane meant the
   // zones were only ~13cm wide, so a single long stride crossed two
   // boundaries at once and skipped a lane.
-  const vLat = Math.abs(sCx - prevCx) / dt;                        // shoulder-widths/sec
-  prevCx = sCx;
+  const vLat = Math.abs(prevCx - rawCs) * aspect / dt / scale;     // shoulder-widths/sec
+  prevCx = rawCs;
 
   if (laneArmed && Math.abs(dx) > th.lane) {
-    const next = clamp(g.lane + Math.sign(dx), 0, 2);
+    const dir = Math.sign(dx);
+    const next = clamp(g.lane + dir, 0, 2);
     if (next !== g.lane) setLane(next);
+    // Move the neutral point to the crossing itself, so the rest of *this*
+    // stride cannot immediately re-cross and take a second lane.
+    baseCX = clamp(baseCX + dir * th.lane, calCX - 1.6, calCX + 1.6);
     laneArmed = false;
     laneStillSince = 0;
   }
   if (!laneArmed) {
-    // Re-arm only once you have actually stopped moving, and only then treat
-    // where you now stand as the new neutral. Re-centring the instant a step
-    // fires would let the back half of that same stride trigger again.
-    if (vLat < 0.5) {
-      if (!laneStillSince) laneStillSince = now;
-      if (now - laneStillSince > 180) {
-        baseCX = clamp(sCx, calCX - 1.4, calCX + 1.4);
-        laneArmed = true;
-        laneStillSince = 0;
-      }
-    } else laneStillSince = 0;
+    // Re-arm on the deceleration between steps, not on standing still. Two
+    // brisk steps in a row never have a still moment in them, so demanding one
+    // swallowed the second step entirely. The hard timeout is the backstop:
+    // whatever happens, control comes back.
+    if (!laneStillSince) laneStillSince = now;
+    const slowed = vLat < 1.3;
+    if ((slowed && now - laneStillSince > 90) || now - laneStillSince > 520) {
+      // Re-arm against the instantaneous position, not the smoothed one: the
+      // filter is still converging at this moment, and the rest of that
+      // convergence looks exactly like a fresh step, which took a second lane
+      // off the back of one long stride.
+      baseCX = clamp(cx, calCX - 1.6, calCX + 1.6);
+      laneArmed = true;
+      laneStillSince = 0;
+    } else if (!slowed) {
+      laneStillSince = Math.max(laneStillSince, now - 89);
+    }
   }
 
   if (phase === 'playing') {
