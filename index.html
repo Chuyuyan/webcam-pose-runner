@@ -1617,7 +1617,7 @@ function showMenu() {
 //                 Pose control (MediaPipe Pose)
 // ============================================================
 let landmarker = null, video = null;
-let baseHipY = 0, baseShY = 0, baseCX = 0, baseTorso = 0.25;
+let baseHipY = 0, baseShY = 0, baseCX = 0, baseTorso = 0.22;   // baseTorso = apparent shoulder width
 // the values calibration actually measured; the adaptive baseline is only
 // allowed to wander a bounded distance from them
 let calHipY = 0, calShY = 0, calCX = 0;
@@ -1647,12 +1647,14 @@ const videoAspect = () =>
 // length; stand too close and limbs leave the frame and get guessed at; stand
 // off to one side and there is no symmetric room left to step into.
 const FRAME_BOX = { x0: 0.30, x1: 0.70, y0: 0.08, y1: 0.94 };
-const TORSO_MIN = 0.15, TORSO_MAX = 0.40;
+const SW_MIN = 0.13, SW_MAX = 0.35;   // apparent shoulder width, as a fraction of frame height
 let framingOk = false, framingHint = '';
 
-function checkFraming(cxNow, shY, hipY, torsoNow) {
-  if (torsoNow < TORSO_MIN) return { ok: false, hint: 'Come closer' };
-  if (torsoNow > TORSO_MAX) return { ok: false, hint: 'Step back' };
+// Takes raw frame coordinates, not the normalised ones the detector uses —
+// framing is a question about where you are in the picture.
+function checkFraming(cxNow, shY, hipY, swNow) {
+  if (swNow < SW_MIN) return { ok: false, hint: 'Come closer' };
+  if (swNow > SW_MAX) return { ok: false, hint: 'Step back' };
   // the preview is a mirror, so left and right are the player's own
   if (cxNow < FRAME_BOX.x0 + 0.05) return { ok: false, hint: 'Move right, into the box' };
   if (cxNow > FRAME_BOX.x1 - 0.05) return { ok: false, hint: 'Move left, into the box' };
@@ -1663,20 +1665,21 @@ function checkFraming(cxNow, shY, hipY, torsoNow) {
 
 // Thresholds as fractions of torso length — distance-invariant, and shared
 // with the camera overlay so the guides always match the real trigger points.
+// In shoulder-widths. The signals are already divided by apparent body size,
+// so these are plain constants rather than fractions of a measured length —
+// nothing here moves when the player does.
 function poseTh() {
   return {
-    // A normal in-place hop lifts the hips ~10cm on a ~50cm torso, and the
-    // smoothing filter shaves the peak further, so this sits well under that.
-    // Upward speed, not height, is what keeps drift from faking a jump.
-    jump: baseTorso * 0.18,
-    // Crouching is measured as the larger of the shoulder and hip drop, so a
-    // forward bend at the waist counts too — that is how a lot of people
-    // actually duck, and watching hips alone missed it completely.
-    duck: baseTorso * 0.19,
-    // ~13cm of body-centre travel on a 50cm torso: a decisive lean or a small
-    // side step, not the half-metre stride the un-corrected maths demanded.
-    lane: baseTorso * 0.26,
-    center: baseTorso * 0.12,
+    // A normal in-place hop lifts the body about a fifth of a shoulder width,
+    // and the smoothing filter shaves the peak further, so this sits under
+    // that. Upward speed, not height, is what keeps drift from faking a jump.
+    jump: 0.21,
+    // The larger of the shoulder and hip drop, so a forward bend at the waist
+    // counts too — that is how a lot of people actually duck.
+    duck: 0.24,
+    // A decisive lean or a small side step.
+    lane: 0.34,
+    center: 0.16,
   };
 }
 let calibrated = false;
@@ -1773,8 +1776,22 @@ function handlePose(result, now) {
   if (phase === 'paused' && autoPauseReason === 'pose') resumeGame();
 
   const aspect = videoAspect();
-  const shoulderY = (ls.y + rs.y) / 2;
-  const hipY = (lh.y + rh.y) / 2;
+
+  // Apparent body scale. Shoulder width, not shoulder-to-hip: crouching does
+  // not make you narrower, but it does shorten the torso in frame, so a
+  // torso-based scale moves for the very posture it is meant to measure.
+  const sw = Math.max(0.04, Math.abs(ls.x - rs.x) * aspect);
+
+  // Everything below is measured from the optical axis (frame centre) and
+  // divided by that scale. This is the fix for the whole class of bug where
+  // stepping *towards or away from* the camera looked like a gesture: a
+  // webcam is a perspective projection, so backing off moves shoulders — which
+  // sit above the axis — down the frame while hips move up, which is exactly
+  // what crouching looks like to a detector watching raw positions. Under this
+  // normalisation both the offset and the scale shrink by the same factor when
+  // you move, and cancel; a real crouch moves the body but not the width.
+  const shoulderN = ((ls.y + rs.y) / 2 - 0.5) / sw;
+  const hipN = ((lh.y + rh.y) / 2 - 0.5) / sw;
 
   // Mirrored coords: mx=0 is the left of the mirrored view (player's left).
   // Shoulders are weighted over hips because leaning — the quick, natural way
@@ -1782,39 +1799,35 @@ function handlePose(result, now) {
   // average threw away half of that motion.
   const shoulderMid = 1 - (ls.x + rs.x) / 2;
   const hipMid = 1 - (lh.x + rh.x) / 2;
-  const cx = hipsUsable ? shoulderMid * 0.62 + hipMid * 0.38 : shoulderMid;
+  const cxRaw = hipsUsable ? shoulderMid * 0.62 + hipMid * 0.38 : shoulderMid;
+  const cx = (cxRaw - 0.5) * aspect / sw;
 
-  // Scale reference. Shoulder-to-hip is the better measure when we can trust
-  // the hips; otherwise fall back to shoulder width, which clothing never
-  // hides. (Shoulder width is an x measurement, so it needs the aspect fix.)
-  const torso = hipsUsable
-    ? Math.max(0.08, hipY - shoulderY)
-    : Math.max(0.08, Math.abs(ls.x - rs.x) * aspect * 1.15);
-
-  // Light smoothing: the lite model jitters by a few pixels frame to frame and
-  // a single spike used to be enough to fire a jump.
+  // Light smoothing: the model jitters by a few pixels frame to frame and a
+  // single spike used to be enough to fire a jump. `sw` gets the same light
+  // filter, not a slow one — it has to track the current scale or a quick step
+  // backwards would desync it from the offsets and reintroduce the bug.
   if (!poseSmoothed) {
-    sHipY = hipY; sShY = shoulderY; sCx = cx; sTorso = torso;
-    prevVY = hipsUsable ? hipY : shoulderY;
+    sHipY = hipN; sShY = shoulderN; sCx = cx; sTorso = sw;
+    prevVY = hipsUsable ? hipN : shoulderN;
     poseSmoothed = true;
   } else {
-    sHipY += (hipY - sHipY) * 0.6;
-    sShY += (shoulderY - sShY) * 0.6;
+    sHipY += (hipN - sHipY) * 0.6;
+    sShY += (shoulderN - sShY) * 0.6;
     sCx += (cx - sCx) * 0.6;
-    sTorso += (torso - sTorso) * 0.08;   // body size changes slowly
+    sTorso += (sw - sTorso) * 0.5;
   }
 
   if (phase === 'calibrating') {
     // Framing has to hold for the whole window, not just at the end — a
     // baseline measured while drifting is worse than no baseline.
-    const fr = checkFraming(sCx, sShY, sHipY, sTorso);
+    const fr = checkFraming(cxRaw, (ls.y + rs.y) / 2, (lh.y + rh.y) / 2, sw);
     framingOk = fr.ok; framingHint = fr.hint;
     if (!fr.ok) {
       calSamples.length = 0;
       camStatus.textContent = fr.hint;
       return;
     }
-    calSamples.push({ cx, hipY, shoulderY, torso });
+    calSamples.push({ cx, hipY: hipN, shoulderY: shoulderN, torso: sw });
     camStatus.textContent = `Hold still… ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
     if (calSamples.length >= 50) {
       baseCX = avg(calSamples.map(s => s.cx));
@@ -1835,7 +1848,7 @@ function handlePose(result, now) {
   if (!calibrated) return;
 
   // keep the framing readout live during play so drifting out is visible
-  const frLive = checkFraming(sCx, sShY, sHipY, sTorso);
+  const frLive = checkFraming(cxRaw, (ls.y + rs.y) / 2, (lh.y + rh.y) / 2, sw);
   framingOk = frLive.ok; framingHint = frLive.hint;
 
   const th = poseTh();
@@ -1846,7 +1859,7 @@ function handlePose(result, now) {
   const vy = hipsUsable ? sHipY : sShY;
   const baseVY = hipsUsable ? baseHipY : baseShY;
   const rise = baseVY - vy;                            // + = body above baseline
-  const dx = (sCx - baseCX) * aspect;                  // now comparable to torso
+  const dx = sCx - baseCX;                             // already in shoulder-widths
 
   // Crouch: whichever drops further. A squat lowers both; bending forward at
   // the waist lowers the shoulders while the hips barely move, and that used
@@ -1856,7 +1869,7 @@ function handlePose(result, now) {
   g.poseDuck = drop > th.duck;
   if (g.poseDuck) { lastDuckAt = now; if (!duckSince) duckSince = now; } else duckSince = 0;
 
-  const vUp = (prevVY - vy) / dt / baseTorso;          // torso lengths / second
+  const vUp = (prevVY - vy) / dt;                      // shoulder-widths / second
   prevVY = vy;
 
   // Adaptive baseline. "Where do you actually stand" is a question about
@@ -1866,7 +1879,7 @@ function handlePose(result, now) {
   // in — it could never catch up: jumps then needed nearly double the height,
   // and past the crouch threshold you were stuck in a permanent slide with
   // no way back, because being stuck also blocked the adaptation.
-  if (Math.abs(vUp) < 0.35 && g.grounded) {
+  if (Math.abs(vUp) < 0.40 && g.grounded) {
     if (!postureStillSince) postureStillSince = now;
   } else postureStillSince = 0;
 
@@ -1877,13 +1890,12 @@ function handlePose(result, now) {
     const staleDuck = duckSince && now - duckSince > 2500;
     const rate = (g.poseDuck && !staleDuck) ? 0.004 : 0.03;
     baseShY += (sShY - baseShY) * rate;
-    baseShY = clamp(baseShY, calShY - baseTorso * 0.6, calShY + baseTorso * 0.6);
+    baseShY = clamp(baseShY, calShY - 0.7, calShY + 0.7);
     if (hipsUsable) baseHipY += (sHipY - baseHipY) * rate;
     baseTorso += (sTorso - baseTorso) * 0.02;
     // Sideways re-centring is not done here — the step detector owns baseCX,
     // and a second source drifting it would fight the one-step-one-lane rule.
-    const limY = baseTorso * 0.6;
-    baseHipY = clamp(baseHipY, calHipY - limY, calHipY + limY);
+    baseHipY = clamp(baseHipY, calHipY - 0.7, calHipY + 0.7);
   }
   // Two ways in. The slow path waits for real height, which is unavoidably
   // late: you have to physically rise ~9cm first, and a jump starts with a
@@ -1891,8 +1903,8 @@ function handlePose(result, now) {
   // fires on the push-off itself. Running on the spot bobs at up to ~0.8
   // torso/sec, while a real take-off reaches 3-4, so the gap is wide enough
   // to trigger on speed alone without the position gate.
-  const tookOff = vUp > 1.8;
-  const roseEnough = rise > th.jump && vUp > 0.55;
+  const tookOff = vUp > 2.0;
+  const roseEnough = rise > th.jump && vUp > 0.62;
   if (jumpArmed && (tookOff || roseEnough) &&
       now - lastJumpAt > 380 && now - lastDuckAt > 300) {
     jumpArmed = false;
@@ -1905,7 +1917,7 @@ function handlePose(result, now) {
   // happen to be standing. Mapping absolute position onto a lane meant the
   // zones were only ~13cm wide, so a single long stride crossed two
   // boundaries at once and skipped a lane.
-  const vLat = Math.abs(sCx - prevCx) * aspect / dt / baseTorso;   // torso/sec
+  const vLat = Math.abs(sCx - prevCx) / dt;                        // shoulder-widths/sec
   prevCx = sCx;
 
   if (laneArmed && Math.abs(dx) > th.lane) {
@@ -1921,8 +1933,7 @@ function handlePose(result, now) {
     if (vLat < 0.5) {
       if (!laneStillSince) laneStillSince = now;
       if (now - laneStillSince > 180) {
-        const lim = baseTorso * 1.2 / aspect;
-        baseCX = clamp(sCx, calCX - lim, calCX + lim);
+        baseCX = clamp(sCx, calCX - 1.4, calCX + 1.4);
         laneArmed = true;
         laneStillSince = 0;
       }
@@ -1969,26 +1980,32 @@ function drawCam(result) {
 
   if (calibrated) {
     const th = poseTh();
-    // lane boundaries — converted back out of torso units into frame x
-    const laneX = th.lane / videoAspect();
+    // The detector works in shoulder-widths from the frame centre; the guides
+    // have to be projected back into frame coordinates to be drawn, which is
+    // what the current apparent scale is for. They therefore move with you as
+    // you change distance, which is the point — so do the trigger thresholds.
+    const asp = videoAspect();
+    const toX = n => (0.5 + n * sTorso / asp) * w;
+    const toY = n => (0.5 + n * sTorso) * h;
+
     for (const s of [-1, 1]) {
-      const x = (baseCX + s * laneX) * w;
+      const x = toX(baseCX + s * th.lane);
       camCtx.strokeStyle = 'rgba(67,232,255,.6)'; camCtx.lineWidth = 1.5;
       camCtx.setLineDash([5, 4]);
       camCtx.beginPath(); camCtx.moveTo(x, 0); camCtx.lineTo(x, h); camCtx.stroke();
     }
-    // jump and crouch guides, drawn around whichever baseline is in use
     const bV = hipsUsable ? baseHipY : baseShY;
     camCtx.setLineDash([4, 4]);
     camCtx.strokeStyle = 'rgba(120,255,180,.5)';
-    const jy = (bV - th.jump) * h;
+    const jy = toY(bV - th.jump);
     camCtx.beginPath(); camCtx.moveTo(0, jy); camCtx.lineTo(w, jy); camCtx.stroke();
     camCtx.strokeStyle = 'rgba(255,140,120,.5)';
-    const dy = (baseShY + th.duck) * h;      // crouch reads off the shoulders
+    const dy = toY(baseShY + th.duck);       // crouch reads off the shoulders
     camCtx.beginPath(); camCtx.moveTo(0, dy); camCtx.lineTo(w, dy); camCtx.stroke();
     camCtx.setLineDash([]);
     camCtx.strokeStyle = 'rgba(255,210,63,.55)';
-    camCtx.beginPath(); camCtx.moveTo(0, bV * h); camCtx.lineTo(w, bV * h); camCtx.stroke();
+    const by = toY(bV);
+    camCtx.beginPath(); camCtx.moveTo(0, by); camCtx.lineTo(w, by); camCtx.stroke();
   }
 
   const lm = result && result.landmarks && result.landmarks[0];
@@ -2030,8 +2047,8 @@ window.__dbg = {
   poseBase: () => ({ baseHipY, baseShY, baseCX, baseTorso, calibrated, jumpArmed, hipsUsable }),
   poseSignals: () => ({
     sHipY, sShY, sTorso, hipsUsable, jumpArmed,
-    rise: (hipsUsable ? baseHipY - sHipY : baseShY - sShY) / baseTorso,   // in torso units
-    drop: (hipsUsable ? Math.max(sShY - baseShY, sHipY - baseHipY) : sShY - baseShY) / baseTorso,
+    rise: hipsUsable ? baseHipY - sHipY : baseShY - sShY,   // shoulder-widths
+    drop: hipsUsable ? Math.max(sShY - baseShY, sHipY - baseHipY) : sShY - baseShY,
     poseDuck: g.poseDuck, lastDuckAt, lastJumpAt,
   }),
   setCalibrated: v => { calibrated = v; },
