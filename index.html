@@ -1138,34 +1138,34 @@ function drawCat() {
   // contact shadow
   ell(cx, gy - s * 0.04, s * 0.60, s * 0.14, 'rgba(0,0,0,.34)');
 
-  // Running away from us, so the head is the furthest part: higher up the
-  // screen and smaller, with the rump nearest and largest.
-  const hx = cx, hy = gy - s * 1.02 + bob * 1.2, hr = s * 0.29;
+  // Running away from us, so the head is the furthest part — and from
+  // directly behind a running cat it is almost entirely hidden by the raised
+  // back. Only the ears and a sliver of crown clear the shoulders. Drawing a
+  // whole disc up there, however "correct" the shading, just rebuilds a face:
+  // two bumps on a circle is all anyone needs to see one.
+  const hx = cx, hy = gy - s * 1.05 + bob * 1.2, hr = s * 0.19;
 
-  // backs of the ears — the outer shell only, no pink lining from this side
   for (const dir of [-1, 1]) {
     ctx.fillStyle = dir < 0 ? MID : DARK;
     ctx.beginPath();
-    ctx.moveTo(hx + dir * hr * 0.86, hy - hr * 0.44);
-    ctx.lineTo(hx + dir * hr * 0.70, hy - hr * 1.58);
-    ctx.lineTo(hx + dir * hr * 0.10, hy - hr * 0.86);
+    ctx.moveTo(hx + dir * hr * 1.10, hy - hr * 0.55);
+    ctx.lineTo(hx + dir * hr * 1.42, hy - hr * 1.95);
+    ctx.lineTo(hx + dir * hr * 0.24, hy - hr * 1.05);
     ctx.closePath(); ctx.fill();
   }
+  ell(hx, hy, hr, hr * 0.95, DARK);
 
-  // back of the head, then the neck and back sweeping down toward us
-  ell(hx, hy, hr, hr * 0.94, MID);
-  ell(hx - hr * 0.22, hy - hr * 0.20, hr * 0.58, hr * 0.50, LIT);
-
-  ell(cx, gy - s * 0.74 + bob, s * 0.40, s * 0.34, MID);
+  // the back, drawn over the head so only its crown clears the shoulders
+  ell(cx, gy - s * 0.80 + bob, s * 0.42, s * 0.34, MID);
 
   // front paws, just visible either side of the shoulders
   ctx.strokeStyle = DEEP;
-  ctx.lineWidth = s * 0.13; ctx.lineCap = 'round';
+  ctx.lineWidth = s * 0.12; ctx.lineCap = 'round';
   for (const dir of [-1, 1]) {
     const reach = Math.sin(trot + (dir < 0 ? 0 : Math.PI));
     ctx.beginPath();
-    ctx.moveTo(cx + dir * s * 0.30, gy - s * 0.74 + bob);
-    ctx.lineTo(cx + dir * s * (0.40 + reach * 0.06), gy - s * (0.46 + Math.max(0, reach) * 0.10));
+    ctx.moveTo(cx + dir * s * 0.32, gy - s * 0.78 + bob);
+    ctx.lineTo(cx + dir * s * (0.43 + reach * 0.06), gy - s * (0.50 + Math.max(0, reach) * 0.10));
     ctx.stroke();
   }
 
@@ -1182,25 +1182,27 @@ function drawCat() {
 
   // the rump, nearest to us and so the biggest form
   ell(cx, gy - s * 0.50 + bob, s * 0.50, s * 0.44, MID);
-  ell(cx - s * 0.14, gy - s * 0.60 + bob, s * 0.30, s * 0.24, LIT);
+  ell(cx - s * 0.15, gy - s * 0.62 + bob, s * 0.28, s * 0.20, LIT);
   ell(cx, gy - s * 0.30 + bob, s * 0.40, s * 0.18, DARK);
 
-  // tabby bars across the back — from behind, these are what say "cat"
+  // Bars across the back only. A stripe down the spine as well turned the
+  // markings into a cross, which the eye promptly read as a muzzle.
   ctx.strokeStyle = DEEP;
-  ctx.lineWidth = s * 0.07; ctx.lineCap = 'round';
-  for (const [y, w] of [[0.88, 0.22], [0.72, 0.28], [0.56, 0.30]]) {
+  ctx.lineCap = 'round';
+  ctx.lineWidth = s * 0.07;
+  for (const [y, w] of [[0.86, 0.20], [0.70, 0.28], [0.54, 0.32], [0.40, 0.28]]) {
     ctx.beginPath();
     ctx.moveTo(cx - s * w, gy - s * y + bob);
-    ctx.quadraticCurveTo(cx, gy - s * (y + 0.06) + bob, cx + s * w, gy - s * y + bob);
+    ctx.quadraticCurveTo(cx, gy - s * (y + 0.08) + bob, cx + s * w, gy - s * y + bob);
     ctx.stroke();
   }
 
   // tail up and swaying, the nearest thing of all
   const tw = Math.sin(trot * 0.6);
   ctx.strokeStyle = MID;
-  ctx.lineWidth = s * 0.16; ctx.lineCap = 'round';
+  ctx.lineWidth = s * 0.16;
   ctx.beginPath();
-  ctx.moveTo(cx + s * 0.04, gy - s * 0.80 + bob);
+  ctx.moveTo(cx + s * 0.02, gy - s * 0.86 + bob);   // rooted in the rump
   ctx.quadraticCurveTo(
     cx + s * (0.34 + tw * 0.22), gy - s * 1.28,
     cx + s * (0.20 + tw * 0.44), gy - s * 1.86);
