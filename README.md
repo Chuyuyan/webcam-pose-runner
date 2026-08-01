@@ -37,6 +37,18 @@ The player has real vertical physics (gravity, velocity, and whatever surface is
 
 Keyboard mode: ← → switch lanes, ↑ jump, ↓ slide. In camera mode press C to recalibrate.
 
+## The world
+
+Buildings and trees line both sides of the road, placed in blocks rather than an even sprinkle so the run passes through city and through parkland. A single body crosses the sky, sinks, and comes back up as the other one — moon, then sun, then moon — over about two minutes of running. Everything else tints off how high the sun is, so the sky, the skyline, the ground and the scenery all change together rather than a disc changing on its own.
+
+## The wrap-up
+
+Dying no longer drops you straight back into a run. The summary is a separate scene with its own turntable projection: the robot is built in body space and genuinely rotated about its vertical axis, painted back to front by depth. Orbiting the *game* camera instead would swing half the world behind the near plane and come apart, but the summary has only one thing in it, so it can be done properly.
+
+Parts carry real depth as well as width — a turntable folds anything sitting at zero depth into a vertical line at side-on angles, which is what the first version did. The torso is projected as a box, the legs are staggered one foot forward, and the visor only appears while the head is actually facing you.
+
+Input is locked for 1.4 s so the wrap-up is seen rather than skipped by a key that was already held down. The button is armed from the same clock the key handler checks: on a wall-clock timeout it went live while the animation clock was stalled in a background tab, leaving a button that looked clickable and did nothing.
+
 ## Hearts and speed
 
 You start with 3 hearts. Hitting something costs one heart, knocks that obstacle out of the way, and grants 1.4 s of invulnerability so a single train cannot drain the whole bar. 10 s of clean running restores one heart — the next heart to come back fills from the bottom in the HUD as you earn it. The run ends at zero hearts.

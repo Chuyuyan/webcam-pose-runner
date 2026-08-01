@@ -511,11 +511,10 @@ function crash() {
     <div class="sub" id="sum-hint">${mode === 'pose' ? 'or jump in place' : 'or press Space'}</div>
     <div id="lb-slot"></div>
   `, true);
-  const again = document.getElementById('btn-again');
-  again.onclick = () => restartRun();
-  // A beat before anything is accepted, so the wrap-up actually gets seen
-  // instead of being skipped by the key that was already being held down.
-  setTimeout(() => { if (phase === 'summary') again.disabled = false; }, SUMMARY_LOCK * 1000);
+  // The button is enabled from renderSummary off the same clock restartRun()
+  // checks. Arming it on a wall-clock timeout instead let it go live while
+  // summaryT was stalled in a background tab — clickable, and did nothing.
+  document.getElementById('btn-again').onclick = () => restartRun();
 
   // Cloud score + leaderboard, if accounts are on. Fire-and-forget: the
   // game-over screen is already up and must not wait on the network.
@@ -716,6 +715,9 @@ function renderSummary(now) {
   }
 
   drawHeroRobot(cx, floorY, scale, yaw, summaryT, rise);
+
+  const again = document.getElementById('btn-again');
+  if (again) again.disabled = summaryT < SUMMARY_LOCK;
 }
 
 // Orthographic turntable: body-space (rx across, ry up, rz forward) rotated
@@ -728,90 +730,108 @@ function drawHeroRobot(cx, cy, s, yaw, t, rise) {
   const px = (rx, rz) => cx + (rx * cosY + rz * sinY) * s;
   const pz = (rx, rz) => -rx * sinY + rz * cosY;
   const py = ry => cy - ry * s - lift;
-  ctx.save();
-  ctx.globalAlpha = rise;
+  // Projected width of a box of the given plan size. Without this the figure
+  // has no depth at all and folds into a vertical line at side-on angles,
+  // which is exactly what a turntable does to parts that all sit at rz = 0.
+  const boxW = (w, d) => Math.hypot(w * cosY, d * sinY);
 
   const breath = Math.sin(t * 1.6) * 0.012;
   const parts = [];
   const add = (depth, fn) => parts.push({ depth, fn });
 
-  const CY = '#43e8ff', CY_D = '#2b9fc4', LEG = '#2fb8ff', LEG_D = '#1f7fb4';
+  const CY = '#43e8ff', CY_D = '#2790b4', LEG = '#2fb8ff', LEG_D = '#1c74a4';
+  const shade = (d, lit, dark) => (d < 0 ? dark : lit);
 
-  // legs, planted apart
-  for (const side of [-1, 1]) {
-    const rx = side * 0.30;
-    add(pz(rx, 0), () => {
-      ctx.strokeStyle = pz(rx, 0) < 0 ? LEG_D : LEG;
-      ctx.lineWidth = s * 0.15; ctx.lineCap = 'round';
+  // A planted stance with one foot forward, so the legs stay apart from every
+  // angle rather than overlapping when seen from the side.
+  for (const [side, fwd] of [[-1, -0.20], [1, 0.22]]) {
+    const rx = side * 0.26;
+    add(pz(rx, fwd), () => {
+      ctx.strokeStyle = shade(pz(rx, fwd), LEG, LEG_D);
+      ctx.lineWidth = s * 0.15; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.beginPath();
-      ctx.moveTo(px(rx * 0.7, 0), py(0.62));
-      ctx.lineTo(px(rx, 0.05), py(0.28));
-      ctx.lineTo(px(rx * 1.15, -0.05), py(0.02));
+      ctx.moveTo(px(rx * 0.75, fwd * 0.3), py(0.66));
+      ctx.lineTo(px(rx, fwd * 0.8), py(0.32));
+      ctx.lineTo(px(rx * 1.1, fwd), py(0.03));
       ctx.stroke();
     });
   }
 
-  // torso
+  // torso as a box, so its silhouette keeps width all the way round
   add(pz(0, 0), () => {
-    const w = s * 0.80, h = s * 0.72;
+    const w = boxW(0.80, 0.52) * s, h = s * 0.74;
+    const x0 = px(0, 0) - w / 2, y0 = py(1.40 + breath);
     ctx.fillStyle = CY;
-    roundRect(px(0, 0) - w / 2, py(1.34 + breath), w, h, s * 0.20);
-    ctx.fill();
-    // the shaded side swaps as the body turns
-    ctx.fillStyle = 'rgba(0,0,0,.20)';
-    const sh = Math.max(0, -sinY) * w * 0.42 + Math.max(0, sinY) * 0;
-    if (sinY < 0) { roundRect(px(0, 0) - w / 2, py(1.34 + breath), sh, h, s * 0.20); ctx.fill(); }
-    else { roundRect(px(0, 0) + w / 2 - sinY * w * 0.42, py(1.34 + breath), sinY * w * 0.42, h, s * 0.20); ctx.fill(); }
-    ctx.fillStyle = 'rgba(255,255,255,.26)';
-    roundRect(px(-0.20, 0.2) - w * 0.10, py(1.24 + breath), w * 0.22, h * 0.52, s * 0.09);
+    roundRect(x0, y0, w, h, s * 0.20); ctx.fill();
+    // the shaded flank swaps sides as it turns
+    ctx.save();
+    roundRect(x0, y0, w, h, s * 0.20); ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,.22)';
+    if (sinY >= 0) ctx.fillRect(x0 + w * (1 - Math.abs(sinY) * 0.5), y0, w, h);
+    else ctx.fillRect(x0, y0, w * Math.abs(sinY) * 0.5, h);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,.24)';
+    const gw = w * 0.20 * Math.max(0.25, cosY);
+    roundRect(px(-0.22, 0.26) - gw / 2, y0 + h * 0.12, gw, h * 0.55, s * 0.09);
     ctx.fill();
   });
 
-  // arms: one thrown up, one on the hip
-  add(pz(-0.44, 0), () => {
-    ctx.strokeStyle = pz(-0.44, 0) < 0 ? CY_D : CY;
+  // arms: one on the hip, one thrown up
+  add(pz(-0.46, 0.04), () => {
+    ctx.strokeStyle = shade(pz(-0.46, 0.04), CY, CY_D);
     ctx.lineWidth = s * 0.13; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(px(-0.40, 0), py(1.26 + breath));
-    ctx.lineTo(px(-0.62, 0.05), py(1.02));
-    ctx.lineTo(px(-0.34, 0.05), py(0.86));
+    ctx.moveTo(px(-0.38, 0.02), py(1.32 + breath));
+    ctx.lineTo(px(-0.66, 0.16), py(1.08));
+    ctx.lineTo(px(-0.30, 0.20), py(0.92));
     ctx.stroke();
   });
-  const punch = 1.92 + Math.sin(t * 1.6) * 0.05;
-  add(pz(0.44, 0), () => {
-    ctx.strokeStyle = pz(0.44, 0) < 0 ? CY_D : CY;
+  const punch = 1.98 + Math.sin(t * 1.6) * 0.05;
+  add(pz(0.46, 0.10), () => {
+    ctx.strokeStyle = shade(pz(0.46, 0.10), CY, CY_D);
     ctx.lineWidth = s * 0.13; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(px(0.40, 0), py(1.28 + breath));
-    ctx.lineTo(px(0.66, 0.05), py(1.60));
-    ctx.lineTo(px(0.52, 0.05), py(punch));
+    ctx.moveTo(px(0.38, 0.02), py(1.34 + breath));
+    ctx.lineTo(px(0.70, 0.16), py(1.64));
+    ctx.lineTo(px(0.54, 0.14), py(punch));
     ctx.stroke();
-    ctx.fillStyle = pz(0.44, 0) < 0 ? CY_D : CY;
-    ctx.beginPath(); ctx.arc(px(0.52, 0.05), py(punch), s * 0.10, 0, 7); ctx.fill();
+    ctx.fillStyle = shade(pz(0.46, 0.10), CY, CY_D);
+    ctx.beginPath(); ctx.arc(px(0.54, 0.14), py(punch), s * 0.105, 0, 7); ctx.fill();
   });
 
-  // head, with the visor only where it is actually facing us
-  add(pz(0, 0.1), () => {
-    const hr = s * 0.27, hyy = py(2.24 + breath), hxx = px(0, 0);
+  // neck
+  add(pz(0, -0.02), () => {
+    ctx.strokeStyle = CY_D; ctx.lineWidth = s * 0.11; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(px(0, 0), py(2.10)); ctx.lineTo(px(0, 0), py(2.20));
+    ctx.stroke();
+  });
+
+  // head — a sphere reads the same from every angle; only the visor turns
+  add(pz(0, 0.12), () => {
+    const hr = s * 0.28, hyy = py(2.30 + breath), hxx = px(0, 0);
     ctx.fillStyle = '#eef7ff';
     ctx.beginPath(); ctx.arc(hxx, hyy, hr, 0, 7); ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,.14)';
-    ctx.beginPath();
-    ctx.arc(hxx, hyy, hr, Math.PI / 2 - yaw, Math.PI * 1.5 - yaw);
-    ctx.fill();
-    const face = Math.cos(yaw);
-    if (face > 0.04) {
-      const vw = hr * 1.24 * face, vx = px(0, 0.30);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(hxx, hyy, hr, 0, 7); ctx.clip();
+    ctx.fillStyle = 'rgba(20,40,60,.16)';
+    ctx.fillRect(hxx + (sinY >= 0 ? hr * (1 - sinY) : -hr * 2), hyy - hr, hr * 2, hr * 2);
+    ctx.restore();
+    const face = cosY;
+    if (face > 0.06) {
+      const vw = hr * 1.26 * face, vx = px(0, 0.26);
       ctx.fillStyle = '#132033';
-      roundRect(vx - vw / 2, hyy - hr * 0.36, vw, hr * 0.55, hr * 0.25);
+      roundRect(vx - vw / 2, hyy - hr * 0.34, vw, hr * 0.54, hr * 0.24);
       ctx.fill();
       ctx.fillStyle = CY;
-      const ew = vw * 0.19;
-      ctx.fillRect(vx - vw * 0.28, hyy - hr * 0.20, ew, hr * 0.22);
-      ctx.fillRect(vx + vw * 0.09, hyy - hr * 0.20, ew, hr * 0.22);
+      const ew = Math.max(1, vw * 0.19);
+      ctx.fillRect(vx - vw * 0.29, hyy - hr * 0.18, ew, hr * 0.22);
+      ctx.fillRect(vx + vw * 0.10, hyy - hr * 0.18, ew, hr * 0.22);
     }
   });
 
+  ctx.save();
+  ctx.globalAlpha = rise;
   parts.sort((a, b) => a.depth - b.depth);
   for (const p of parts) p.fn();
   ctx.restore();
