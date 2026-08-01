@@ -1121,11 +1121,11 @@ function drawCat() {
 
   // Three flat tones with a fixed light from the upper left, the same way the
   // trains get their volume — a gradient would sit oddly against everything
-  // else. Head-on rather than in profile: chasing you means it faces away
-  // from the camera, but its back is a shape nobody can read, and the face is
-  // the whole reason the thing is threatening.
+  // else. Seen from behind: it is chasing you, and the camera is further back
+  // still, so its back is genuinely what faces us. Turning it around to show
+  // the face read better in isolation but was simply not what you would see.
   const LIT = '#f2a862', MID = '#dd8a45', DARK = '#a9622e';
-  const CREAM = '#f8ddbd';
+  const DEEP = '#7f4720', CREAM = '#f8ddbd';
 
   const ell = (x, y, rx, ry, col) => {
     ctx.fillStyle = col;
@@ -1136,100 +1136,81 @@ function drawCat() {
   ctx.globalAlpha = Math.min(1, 0.35 + near * 1.4);
 
   // contact shadow
-  ell(cx, gy - s * 0.04, s * 0.62, s * 0.15, 'rgba(0,0,0,.34)');
+  ell(cx, gy - s * 0.04, s * 0.60, s * 0.14, 'rgba(0,0,0,.34)');
 
-  // tail, arcing up behind and swaying
-  const tw = Math.sin(trot * 0.6);
-  ctx.strokeStyle = DARK;
-  ctx.lineWidth = s * 0.15; ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(cx + s * 0.30, gy - s * 0.70 + bob);
-  ctx.quadraticCurveTo(
-    cx + s * (0.95 + tw * 0.18), gy - s * 0.95,
-    cx + s * (0.78 + tw * 0.34), gy - s * 1.55);
-  ctx.stroke();
+  // Running away from us, so the head is the furthest part: higher up the
+  // screen and smaller, with the rump nearest and largest.
+  const hx = cx, hy = gy - s * 1.02 + bob * 1.2, hr = s * 0.29;
 
-  // hind legs, mostly hidden behind the body
-  ctx.strokeStyle = DARK;
-  ctx.lineWidth = s * 0.17;
-  for (const dir of [-1, 1]) {
-    const sw = Math.sin(trot + (dir < 0 ? Math.PI : 0)) * s * 0.16;
-    ctx.beginPath();
-    ctx.moveTo(cx + dir * s * 0.34, gy - s * 0.62 + bob);
-    ctx.lineTo(cx + dir * s * 0.38 + sw, gy - s * 0.06);
-    ctx.stroke();
-  }
-
-  // haunches behind, then the chest catching the light in front
-  ell(cx, gy - s * 0.66 + bob * 0.7, s * 0.56, s * 0.44, DARK);
-  ell(cx, gy - s * 0.58 + bob, s * 0.46, s * 0.40, MID);
-  ell(cx - s * 0.13, gy - s * 0.66 + bob, s * 0.26, s * 0.24, LIT);
-
-  // front legs reaching at you, alternating
-  ctx.strokeStyle = MID;
-  ctx.lineWidth = s * 0.19;
-  for (const dir of [-1, 1]) {
-    const reach = Math.sin(trot + (dir < 0 ? 0 : Math.PI));
-    ctx.beginPath();
-    ctx.moveTo(cx + dir * s * 0.24, gy - s * 0.56 + bob);
-    ctx.lineTo(cx + dir * s * (0.28 + reach * 0.10), gy - s * (0.05 + Math.max(0, reach) * 0.26));
-    ctx.stroke();
-  }
-
-  // head
-  const hx = cx, hy = gy - s * 1.06 + bob * 1.3, hr = s * 0.44;
-
-  // ears: outer shell, then the inner catching light
+  // backs of the ears — the outer shell only, no pink lining from this side
   for (const dir of [-1, 1]) {
     ctx.fillStyle = dir < 0 ? MID : DARK;
     ctx.beginPath();
-    ctx.moveTo(hx + dir * hr * 0.92, hy - hr * 0.52);
-    ctx.lineTo(hx + dir * hr * 0.74, hy - hr * 1.62);
-    ctx.lineTo(hx + dir * hr * 0.14, hy - hr * 0.90);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#e79b95';
-    ctx.beginPath();
-    ctx.moveTo(hx + dir * hr * 0.72, hy - hr * 0.66);
-    ctx.lineTo(hx + dir * hr * 0.63, hy - hr * 1.28);
-    ctx.lineTo(hx + dir * hr * 0.32, hy - hr * 0.86);
+    ctx.moveTo(hx + dir * hr * 0.86, hy - hr * 0.44);
+    ctx.lineTo(hx + dir * hr * 0.70, hy - hr * 1.58);
+    ctx.lineTo(hx + dir * hr * 0.10, hy - hr * 0.86);
     ctx.closePath(); ctx.fill();
   }
 
-  ell(hx, hy, hr, hr * 0.92, MID);
-  ell(hx - hr * 0.20, hy - hr * 0.22, hr * 0.62, hr * 0.52, LIT);   // lit brow
-  ell(hx, hy + hr * 0.36, hr * 0.60, hr * 0.42, CREAM);             // muzzle
+  // back of the head, then the neck and back sweeping down toward us
+  ell(hx, hy, hr, hr * 0.94, MID);
+  ell(hx - hr * 0.22, hy - hr * 0.20, hr * 0.58, hr * 0.50, LIT);
 
-  // eyes
+  ell(cx, gy - s * 0.74 + bob, s * 0.40, s * 0.34, MID);
+
+  // front paws, just visible either side of the shoulders
+  ctx.strokeStyle = DEEP;
+  ctx.lineWidth = s * 0.13; ctx.lineCap = 'round';
   for (const dir of [-1, 1]) {
-    const ex = hx + dir * hr * 0.40, ey = hy - hr * 0.10;
-    ell(ex, ey, hr * 0.25, hr * 0.27, '#c9e86a');
-    ell(ex, ey, hr * 0.08, hr * 0.24, '#20140a');                   // slit pupil
-    ell(ex - hr * 0.09, ey - hr * 0.10, hr * 0.07, hr * 0.07, 'rgba(255,255,255,.85)');
-  }
-
-  // nose and mouth
-  ctx.fillStyle = '#d4685f';
-  ctx.beginPath();
-  ctx.moveTo(hx - hr * 0.13, hy + hr * 0.24);
-  ctx.lineTo(hx + hr * 0.13, hy + hr * 0.24);
-  ctx.lineTo(hx, hy + hr * 0.42);
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = '#a9622e';
-  ctx.lineWidth = Math.max(0.8, hr * 0.07);
-  ctx.beginPath();
-  ctx.moveTo(hx, hy + hr * 0.42);
-  ctx.lineTo(hx, hy + hr * 0.56);
-  ctx.stroke();
-
-  // whiskers
-  ctx.strokeStyle = 'rgba(255,240,225,.65)';
-  ctx.lineWidth = Math.max(0.7, hr * 0.05);
-  for (const dir of [-1, 1]) for (const dy of [-0.06, 0.10]) {
+    const reach = Math.sin(trot + (dir < 0 ? 0 : Math.PI));
     ctx.beginPath();
-    ctx.moveTo(hx + dir * hr * 0.34, hy + hr * (0.34 + dy));
-    ctx.lineTo(hx + dir * hr * 1.15, hy + hr * (0.20 + dy * 1.6));
+    ctx.moveTo(cx + dir * s * 0.30, gy - s * 0.74 + bob);
+    ctx.lineTo(cx + dir * s * (0.40 + reach * 0.06), gy - s * (0.46 + Math.max(0, reach) * 0.10));
     ctx.stroke();
   }
+
+  // hind legs driving, behind the rump
+  ctx.strokeStyle = DARK;
+  ctx.lineWidth = s * 0.19;
+  for (const dir of [-1, 1]) {
+    const push = Math.sin(trot + (dir < 0 ? Math.PI : 0));
+    ctx.beginPath();
+    ctx.moveTo(cx + dir * s * 0.30, gy - s * 0.52 + bob);
+    ctx.lineTo(cx + dir * s * (0.40 + push * 0.10), gy - s * 0.04);
+    ctx.stroke();
+  }
+
+  // the rump, nearest to us and so the biggest form
+  ell(cx, gy - s * 0.50 + bob, s * 0.50, s * 0.44, MID);
+  ell(cx - s * 0.14, gy - s * 0.60 + bob, s * 0.30, s * 0.24, LIT);
+  ell(cx, gy - s * 0.30 + bob, s * 0.40, s * 0.18, DARK);
+
+  // tabby bars across the back — from behind, these are what say "cat"
+  ctx.strokeStyle = DEEP;
+  ctx.lineWidth = s * 0.07; ctx.lineCap = 'round';
+  for (const [y, w] of [[0.88, 0.22], [0.72, 0.28], [0.56, 0.30]]) {
+    ctx.beginPath();
+    ctx.moveTo(cx - s * w, gy - s * y + bob);
+    ctx.quadraticCurveTo(cx, gy - s * (y + 0.06) + bob, cx + s * w, gy - s * y + bob);
+    ctx.stroke();
+  }
+
+  // tail up and swaying, the nearest thing of all
+  const tw = Math.sin(trot * 0.6);
+  ctx.strokeStyle = MID;
+  ctx.lineWidth = s * 0.16; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx + s * 0.04, gy - s * 0.80 + bob);
+  ctx.quadraticCurveTo(
+    cx + s * (0.34 + tw * 0.22), gy - s * 1.28,
+    cx + s * (0.20 + tw * 0.44), gy - s * 1.86);
+  ctx.stroke();
+  ctx.strokeStyle = CREAM;
+  ctx.lineWidth = s * 0.15;
+  ctx.beginPath();
+  ctx.moveTo(cx + s * (0.22 + tw * 0.38), gy - s * 1.72);
+  ctx.lineTo(cx + s * (0.20 + tw * 0.44), gy - s * 1.86);
+  ctx.stroke();
 
   ctx.restore();
 }
