@@ -24,19 +24,22 @@ function createPlaykit(options) {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const { gameId } = options;
   const hintKey = `playkit_seen:${baseUrl}`;
-  function setSessionHint(on) {
+  const NO_SESSION_TTL_MS = 60 * 60 * 1e3;
+  function setSessionHint(signedIn) {
     try {
-      if (on) localStorage.setItem(hintKey, "1");
-      else localStorage.removeItem(hintKey);
+      localStorage.setItem(hintKey, signedIn ? "yes" : `no:${Date.now() + NO_SESSION_TTL_MS}`);
     } catch {
     }
   }
-  function hasSessionHint() {
+  function worthAsking() {
+    let hint = null;
     try {
-      return localStorage.getItem(hintKey) === "1";
+      hint = localStorage.getItem(hintKey);
     } catch {
       return true;
     }
+    if (!hint?.startsWith("no:")) return true;
+    return Date.now() >= Number(hint.slice(3));
   }
   let accessToken = null;
   let currentUser = null;
@@ -125,11 +128,11 @@ function createPlaykit(options) {
      * Call once on load. Silently resumes a session from a previous visit
      * (using the refresh cookie) and returns the user, or null if not signed in.
      *
-     * Costs nothing for a player who has never signed in on this browser: it
+     * Free for a player who was found to be signed out a moment ago: it
      * returns without touching the network at all.
      */
     async restore() {
-      if (!hasSessionHint()) return null;
+      if (!worthAsking()) return null;
       await refresh();
       return currentUser;
     },
