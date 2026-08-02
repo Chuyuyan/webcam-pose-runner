@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <title>Pose Runner</title>
 <!-- Optional accounts (playkit). Empty = no accounts, no network calls at all.
      Set this to your playkit URL to enable cloud best scores and leaderboards.
@@ -19,7 +19,18 @@
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: var(--bg); font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
-  #game { display: block; width: 100vw; height: 100vh; }
+  /* A swipe up must not pull-to-refresh and a double tap must not zoom the
+     canvas -- on a phone those browser gestures fire on exactly the strokes
+     the game reads as jump and slide. */
+  body.touch { -webkit-user-select: none; user-select: none;
+               -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+  body.touch #game, body.touch #overlay { touch-action: none; }
+  /* ...but a menu taller than the screen still has to scroll, so give the
+     panel itself back the vertical gesture. */
+  body.touch .panel { touch-action: pan-y; }
+  /* 100vh on mobile means "viewport with the URL bar hidden", so the bottom of
+     the road sits under the browser chrome until you scroll. dvh tracks it. */
+  #game { display: block; width: 100vw; height: 100vh; height: 100dvh; }
 
   #hud {
     position: fixed; top: 16px; right: 20px; text-align: right;
@@ -44,6 +55,17 @@
   #mute svg { width: 19px; height: 19px; fill: #9fb4c8; }
   #mute:hover { border-color: var(--cyan); }
   #mute:hover svg { fill: #fff; }
+  #pause {
+    position: fixed; bottom: 16px; right: 62px; z-index: 20; display: none;
+    width: 38px; height: 38px; padding: 0; border-radius: 10px; cursor: pointer;
+    background: rgba(10,14,30,.6); border: 1px solid #2b3f63;
+    align-items: center; justify-content: center;
+  }
+  body.touch #pause { display: flex; }
+  #pause svg { width: 17px; height: 17px; fill: #9fb4c8; }
+  #pause .play { display: none; }
+  #pause.paused .bars { display: none; }
+  #pause.paused .play { display: block; }
   #mute .off { display: none; }
   #mute.muted .on { display: none; }
   #mute.muted .off { display: block; }
@@ -212,6 +234,29 @@
   .guide-row b { color: #fff; }
   .big-msg { font-size: 30px; font-weight: 800; color: #fff; }
   .over-score { font-size: 64px; font-weight: 800; color: var(--yellow); margin: 8px 0; }
+
+  /* Phone layout: the panel is the whole screen, so everything shrinks and the
+     fixed corners move inside the safe area. */
+  @media (max-width: 560px) {
+    /* the account bar owns the top-right corner, so the score sits below it */
+    #hud { top: 42px; right: 12px; }
+    #score { font-size: 30px; }
+    /* the panel is sized by its content, and the guide rows are wider than a
+       phone -- without this it overflows both edges where nothing can scroll */
+    .panel { padding: 18px 16px; width: 100%; max-width: 100%; }
+    #mode-guide { display: block; margin-top: 18px; min-height: 0; }
+    .panel h1 { font-size: 30px; }
+    .panel .sub { font-size: 13px; margin: 8px 0 18px; }
+    .btn { padding: 13px 22px; font-size: 15px; width: 100%; max-width: 300px; margin: 5px 0; }
+    .guide-row { font-size: 13px; gap: 9px; }
+    .guide-row .key { min-width: 46px; font-size: 12px; }
+    #cam-panel { top: 10px; left: 10px; padding: 5px; }
+    #cam { width: 132px; height: 99px; }
+    #cam-status { font-size: 11px; }
+    #mute, #pause { bottom: calc(14px + env(safe-area-inset-bottom)); }
+    #mute { right: calc(12px + env(safe-area-inset-right)); }
+    #pause { right: calc(58px + env(safe-area-inset-right)); }
+  }
 </style>
 </head>
 <body>
@@ -232,6 +277,11 @@
   <div id="cam-status">Starting camera…</div>
   <button id="recal">Recalibrate (C)</button>
 </div>
+
+<button id="pause" title="Pause">
+  <svg class="bars" viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>
+  <svg class="play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>
+</button>
 
 <button id="mute" title="Mute (M)">
   <svg class="on" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4zM14 3.2v2.1a6.9 6.9 0 010 13.4v2.1a9 9 0 000-17.6z"/></svg>
@@ -2178,6 +2228,63 @@ window.addEventListener('keydown', e => {
   else if (k === 'c' && mode === 'pose') startCalibration();
 });
 
+// ---------- Touch ----------
+// A phone has no arrow keys, so "keys" mode becomes swipe mode there. Detect
+// it by input capability rather than by user agent: what matters is whether
+// there is a finger on the glass, not what the browser calls itself. A laptop
+// with a touchscreen reports both, and keeps the keyboard as well -- the swipe
+// handler is additive, so nothing is taken away.
+const TOUCH = matchMedia('(pointer: coarse)').matches && navigator.maxTouchPoints > 0;
+if (TOUCH) document.body.classList.add('touch');
+
+const SWIPE_MIN = 26;          // px before a stroke counts as a direction
+const TAP_MAX_MS = 320;        // a short still press is a tap, not a swipe
+
+let tStartX = 0, tStartY = 0, tStartT = 0, tFired = false, tActive = false;
+
+function touchAction(dir) {
+  if (phase === 'paused') { if (dir === 'tap') resumeGame(); return; }
+  if (phase === 'summary') { restartRun(); return; }
+  if (phase === 'ready') { startPlay(); if (dir === 'tap' || dir === 'up') return; }
+  if (phase !== 'playing') return;
+  if (dir === 'up' || dir === 'tap') doJump();
+  else if (dir === 'down') doDuck();
+  else if (dir === 'left') setLane(g.lane - 1);
+  else if (dir === 'right') setLane(g.lane + 1);
+}
+
+window.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' || e.target?.closest?.('button, a')) return;
+  tActive = true; tFired = false;
+  tStartX = e.clientX; tStartY = e.clientY; tStartT = performance.now();
+}, { passive: true });
+
+// Resolve on move rather than on release: waiting for the finger to lift adds
+// the whole length of the stroke to input latency, and at speed that is the
+// difference between clearing a hurdle and hitting it.
+window.addEventListener('pointermove', e => {
+  if (!tActive || tFired) return;
+  const dx = e.clientX - tStartX, dy = e.clientY - tStartY;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN) return;
+  tFired = true;
+  touchAction(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left')
+                                          : (dy > 0 ? 'down' : 'up'));
+}, { passive: true });
+
+for (const evt of ['pointerup', 'pointercancel']) {
+  window.addEventListener(evt, e => {
+    if (!tActive) return;
+    tActive = false;
+    if (!tFired && performance.now() - tStartT < TAP_MAX_MS) touchAction('tap');
+  }, { passive: true });
+}
+
+const pauseBtn = document.getElementById('pause');
+pauseBtn.onclick = () => {
+  if (phase === 'playing') pauseGame('manual');
+  else if (phase === 'paused') resumeGame();
+};
+
 // ---------- Overlays ----------
 function showOverlay(html, summary) {
   overlayContent.innerHTML = html;
@@ -2188,11 +2295,14 @@ function hideOverlay() { overlay.classList.add('hidden'); }
 function setPhase(p) {
   phase = p;
   syncMusic();
+  pauseBtn.classList.toggle('paused', p === 'paused');
   if (p === 'playing') hideOverlay();
   if (p === 'ready') showOverlay(`
-    <div class="big-msg">${mode === 'pose' ? 'Jump in place to start!' : 'Press any arrow key to start'}</div>
+    <div class="big-msg">${mode === 'pose' ? 'Jump in place to start!'
+      : TOUCH ? 'Tap to start' : 'Press any arrow key to start'}</div>
     <div class="sub" style="margin-top:14px">${mode === 'pose'
       ? 'Step left / right to switch lanes · Jump in place · Crouch to slide<br>Press C anytime to recalibrate'
+      : TOUCH ? 'Swipe ← → to switch lanes · swipe ↑ or tap to jump · swipe ↓ to slide'
       : '← → switch lanes · ↑ jump · ↓ slide'}</div>
   `);
 }
@@ -2207,10 +2317,12 @@ function pauseGame(reason, title) {
   phase = 'paused';
   autoPauseReason = reason;
   syncMusic();
+  pauseBtn.classList.add('paused');
   showOverlay(`
     <div class="big-msg">${title || 'PAUSED'}</div>
     <div class="sub">${mode === 'pose'
       ? 'Jump in place to resume — or press P / Esc'
+      : TOUCH ? 'Tap anywhere to resume'
       : 'Press P, Esc, or Space to resume'}</div>
     <button class="btn" id="btn-resume">Resume</button>
   `);
@@ -2234,7 +2346,7 @@ function showMenu() {
     Stand 1–2 m from your camera: step sideways to switch lanes,<br>jump in place, crouch to slide.<br>
     Everything runs locally in your browser — no video ever leaves your device.</div>
     <button class="btn" id="btn-pose">Camera Mode</button>
-    <button class="btn ghost" id="btn-keys">Keyboard Mode</button>
+    <button class="btn ghost" id="btn-keys">${TOUCH ? 'Touch Mode' : 'Keyboard Mode'}</button>
     <div id="mode-guide"></div>
   `);
   const guides = {
@@ -2242,14 +2354,17 @@ function showMenu() {
       <div class="guide-row"><span class="key">← →</span><span><b>Step sideways.</b> Each step moves you one lane. Lean or step out and settle back into a comfortable stance — you do not have to hold the position. Step the other way to come back.</span></div>
       <div class="guide-row"><span class="key">↑</span><span><b>Jump in place.</b> Do a small real hop — the jump triggers the moment your hips rise above your calibrated height.</span></div>
       <div class="guide-row"><span class="key">↓</span><span><b>Crouch.</b> Bend your knees and drop your hips to slide; stay low to keep sliding, stand up to run again.</span></div>`,
-    keys: `
+    keys: TOUCH ? `
+      <div class="guide-row"><span class="key">← →</span><span>Swipe sideways to switch lanes</span></div>
+      <div class="guide-row"><span class="key">↑</span><span>Swipe up, or tap anywhere, to jump</span></div>
+      <div class="guide-row"><span class="key">↓</span><span>Swipe down to slide</span></div>` : `
       <div class="guide-row"><span class="key">← →</span><span>Switch lanes</span></div>
       <div class="guide-row"><span class="key">↑</span><span>Jump</span></div>
       <div class="guide-row"><span class="key">↓</span><span>Slide</span></div>`,
   };
   const guideEl = document.getElementById('mode-guide');
   const setGuide = m => { guideEl.innerHTML = guides[m]; };
-  setGuide('pose');
+  setGuide(TOUCH ? 'keys' : 'pose');
   const bp = document.getElementById('btn-pose'), bk = document.getElementById('btn-keys');
   for (const [btn, m] of [[bp, 'pose'], [bk, 'keys']]) {
     btn.addEventListener('mouseenter', () => setGuide(m));
