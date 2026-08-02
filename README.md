@@ -10,6 +10,43 @@ A 3-lane endless runner you play with your body: step sideways to switch lanes, 
 
 Accounts are optional and **off by default** (see [Accounts](#accounts-optional)). Even when turned on, the only thing sent is your score — never camera data.
 
+## Why this exists
+
+Body-controlled games usually need a depth camera or a console peripheral. A
+laptop webcam gives you 2D landmarks, noisy ones, at whatever framerate the
+machine feels like — and the interesting question is whether that is enough to
+control something that has to feel *immediate*.
+
+Most of the work here is not the game. It is turning a jittery skeleton into
+three reliable verbs:
+
+- **A jump is not "the hips went up."** It is the hips rising above a height the
+  player calibrated while standing still, which means the baseline has to adapt
+  to someone who drifts closer to the camera without adapting to someone who is
+  mid-hop.
+- **A lane change must be forgiving.** People lean and settle back rather than
+  holding a pose, so a step is an event, not a state you maintain.
+- **A crouch must survive the model losing your legs**, because it usually does
+  the moment you fold up.
+
+Getting those three wrong makes the game feel broken in a way no amount of art
+fixes, so the thresholds were tuned by replaying scripted landmark sequences
+rather than by flailing at a camera — see [Debugging](#debugging).
+
+The second constraint was privacy: a game that watches you through your webcam
+should be provably not uploading it. Everything runs in the browser, and with
+accounts off the page makes no requests to any server of mine at all.
+
+## Tech stack
+
+| Layer | Tools |
+| --- | --- |
+| Pose | MediaPipe Pose (Tasks Vision), running in-browser via WASM |
+| Rendering | Canvas 2D, hand-rolled game loop — no engine, no framework |
+| Code | One static `index.html` plus plain ES modules; no build step |
+| Accounts | [playkit](https://github.com/Chuyuyan/playkit) SDK, optional and off by default |
+| Hosting | GitHub Pages (static) |
+
 ## Run
 
 Single static HTML file; any static host works (the MediaPipe model loads from a CDN, so an internet connection is required):
