@@ -78,6 +78,12 @@ The player has real vertical physics (gravity, velocity, and whatever surface is
 
 Keyboard mode: ← → switch lanes, ↑ jump, ↓ slide. In camera mode press C to recalibrate.
 
+## Themes
+
+Each run picks the next of three — **Neon City**, **Summer Shore**, **Midwinter** — cycling rather than choosing at random, because random repeats and the whole point is that consecutive runs look different. A theme is one entry in the `THEMES` table: sky, skyline, ground, road, kerbs, lane markings, foliage and building palettes, plus a canopy shape, a roof shape, a weather effect and which form the big obstacle takes. Adding a fourth is a table entry, not a pass through the renderer.
+
+Summer Shore runs on water, so the train is a **shark** — same footprint and the same lethal height, so nothing about the collision rules or riding on top changes, only what you see coming. Midwinter has falling snow, snow-loaded conifers and snow on every roof.
+
 ## The world
 
 Buildings and trees line both sides of the road, placed in blocks rather than an even sprinkle so the run passes through city and through parkland. A single body crosses the sky, sinks, and comes back up as the other one — moon, then sun, then moon — over about two minutes of running. Everything else tints off how high the sun is, so the sky, the skyline, the ground and the scenery all change together rather than a disc changing on its own.

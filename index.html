@@ -344,6 +344,7 @@ const g = {
   obstacles: [], nextSpawn: 0,
   pickups: [], nextPickup: 0,
   scenery: [], nextScenery: 0,
+  flakes: null,
   coins: 0, bonus: 0, boost: 0,   // boost = seconds of high-jump left
   boostCooldown: 0,
   t: 0,                           // seconds of running, for animation phases
@@ -400,6 +401,12 @@ function resetGame() {
   g.obstacles = []; g.nextSpawn = 30; g.shake = 0;
   g.pickups = []; g.nextPickup = 22;
   g.scenery = []; g.nextScenery = 6;
+  // Cycle rather than pick at random: random repeats, and the point is that
+  // consecutive runs look different.
+  themeIdx = (themeIdx + 1) % THEMES.length;
+  localStorage.setItem('poseRunnerTheme', themeIdx);
+  THEME = THEMES[themeIdx];
+  g.flakes = THEME.weather === 'snow' ? makeFlakes() : null;
   g.coins = 0; g.bonus = 0; g.boost = 0;
   // On your heels from the first stride — no quiet opening to settle into.
   g.t = 0; g.slow = 0;
@@ -459,7 +466,11 @@ function setLane(l) {
   g.lane = nl;
 }
 
-function startPlay() { resetGame(); setPhase('playing'); }
+function startPlay() {
+  resetGame();
+  setPhase('playing');
+  showToast(THEME.name);
+}
 
 // Losing a heart knocks the offending obstacle out of the way and grants a
 // short grace period, so one train cannot eat the whole health bar.
@@ -868,16 +879,50 @@ function drawScenery(o, z, day) {
   if (o.type === 'tree') {
     const gx = screenX(o.x, zF), gyy = groundY(zF);
     const th = o.h * unit * pF, tr = o.r * unit * pF;
-    ctx.fillStyle = mixCol('#241a2e', '#5a4232', day);
+    ctx.fillStyle = mixCol(THEME.trunk[0], THEME.trunk[1], day);
     ctx.fillRect(gx - unit * pF * 0.10, gyy - th * 0.62, unit * pF * 0.20, th * 0.62);
-    const lit = mixCol('#1d3a34', '#4f9b4a', day);
-    const dark = mixCol('#132a26', '#316e30', day);
-    for (const [ox, oy, k, col] of [[-0.45, 0.06, 0.72, dark], [0.42, 0.10, 0.66, dark],
-                                     [0, -0.30, 1.0, lit], [-0.22, 0.22, 0.62, lit]]) {
-      ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.arc(gx + ox * tr, gyy - th * 0.62 - tr * 0.55 + oy * tr, tr * k, 0, 7);
-      ctx.fill();
+    const lit = mixCol(THEME.leafLit[0], THEME.leafLit[1], day);
+    const dark = mixCol(THEME.leafDark[0], THEME.leafDark[1], day);
+    const cy0 = gyy - th * 0.62 - tr * 0.55;
+    if (THEME.canopy === 'palm') {
+      // fronds sweeping out and down from the crown
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 7; i++) {
+        const a = -Math.PI + i * (Math.PI / 6) + Math.sin(o.seed * 9 + i) * 0.12;
+        ctx.strokeStyle = i % 2 ? dark : lit;
+        ctx.lineWidth = tr * 0.30;
+        ctx.beginPath();
+        ctx.moveTo(gx, cy0 + tr * 0.4);
+        ctx.quadraticCurveTo(gx + Math.cos(a) * tr * 1.1, cy0 + Math.sin(a) * tr * 0.7,
+                             gx + Math.cos(a) * tr * 1.6, cy0 + Math.sin(a) * tr * 0.5 + tr * 0.5);
+        ctx.stroke();
+      }
+      ctx.fillStyle = lit;
+      ctx.beginPath(); ctx.arc(gx, cy0 + tr * 0.35, tr * 0.24, 0, 7); ctx.fill();
+    } else if (THEME.canopy === 'conifer') {
+      for (let i = 0; i < 3; i++) {
+        const k = 1 - i * 0.26, yy = cy0 + tr * (0.55 - i * 0.62);
+        ctx.fillStyle = i === 1 ? dark : lit;
+        ctx.beginPath();
+        ctx.moveTo(gx - tr * k, yy);
+        ctx.lineTo(gx, yy - tr * 1.25 * k);
+        ctx.lineTo(gx + tr * k, yy);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,.72)';   // snow load on the branches
+        ctx.beginPath();
+        ctx.moveTo(gx - tr * k * 0.9, yy);
+        ctx.lineTo(gx, yy - tr * 0.42 * k);
+        ctx.lineTo(gx + tr * k * 0.9, yy);
+        ctx.closePath(); ctx.fill();
+      }
+    } else {
+      for (const [ox, oy, k, col] of [[-0.45, 0.06, 0.72, dark], [0.42, 0.10, 0.66, dark],
+                                       [0, -0.30, 1.0, lit], [-0.22, 0.22, 0.62, lit]]) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(gx + ox * tr, cy0 + oy * tr, tr * k, 0, 7);
+        ctx.fill();
+      }
     }
     return;
   }
@@ -890,17 +935,27 @@ function drawScenery(o, z, day) {
 
   poly([[screenX(inner, zF), groundY(zF)], [screenX(inner, zF), topY(inner, zF)],
         [screenX(inner, zB), topY(inner, zB)], [screenX(inner, zB), groundY(zB)]],
-       mixCol('#1a1530', '#6a7590', day));
+       mixCol(THEME.wallIn[0], THEME.wallIn[1], day));
   poly([[screenX(inner, zF), topY(0, zF)], [screenX(outer, zF), topY(0, zF)],
         [screenX(outer, zB), topY(0, zB)], [screenX(inner, zB), topY(0, zB)]],
-       mixCol('#241d3e', '#8794ad', day));
+       mixCol(THEME.wallTop[0], THEME.wallTop[1], day));
   const fw = o.w * unit * pF, fx = screenX(o.x, zF), fy = groundY(zF), fh = o.h * unit * pF;
-  ctx.fillStyle = mixCol('#2b2247', '#9aa6bd', day);
+  if (THEME.hut) {
+    // a pitched roof over the front face reads as a hut or a cabin rather
+    // than another tower block
+    ctx.fillStyle = mixCol(THEME.wallTop[0], THEME.wallTop[1], day);
+    ctx.beginPath();
+    ctx.moveTo(fx - fw * 0.62, fy - fh);
+    ctx.lineTo(fx, fy - fh - fw * 0.42);
+    ctx.lineTo(fx + fw * 0.62, fy - fh);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = mixCol(THEME.wallFront[0], THEME.wallFront[1], day);
   ctx.fillRect(fx - fw / 2, fy - fh, fw, fh);
 
   // lit windows — a fixed grid per building, and fewer of them by day
   const cols = Math.max(1, Math.round(o.w * 1.5)), rows = Math.max(1, Math.round(o.h * 0.8));
-  const wOn = mixCol('#ffd98a', '#c8d8ea', day);
+  const wOn = mixCol(THEME.window[0], THEME.window[1], day);
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const n = Math.sin((r * 12.9898 + c * 78.233 + o.seed * 43.7) * 43758.5453);
     if ((n - Math.floor(n)) > (day > 0.4 ? 0.35 : 0.55)) continue;
@@ -1056,6 +1111,69 @@ function update(dt) {
 }
 
 // ---------- Rendering ----------
+// ---------- Themes ----------
+// A run picks one and keeps it. Everything drawn from the horizon down reads
+// its palette from here, so adding a fourth is a table entry rather than a
+// pass through the renderer. Night and day colours are given as pairs because
+// the sky cycle blends between them.
+const THEMES = [
+  {
+    id: 'city', name: 'NEON CITY',
+    sky: [['#0b0e2a', '#4aa8e8'], ['#2a1a5e', '#93cdf0'], ['#b03a8c', '#ffd9a8']],
+    far: [['#1b1440', '#7c93bd'], ['#251a52', '#93a8ce']],
+    ground: [['#171233', '#4a5b46'], ['#0d0a20', '#2e3a2c']],
+    road: '#191631', kerb: 'rgba(67,232,255,.8)', dash: 'rgba(255,255,255,.35)',
+    trunk: ['#241a2e', '#5a4232'], leafLit: ['#1d3a34', '#4f9b4a'], leafDark: ['#132a26', '#316e30'],
+    wallIn: ['#1a1530', '#6a7590'], wallTop: ['#241d3e', '#8794ad'],
+    wallFront: ['#2b2247', '#9aa6bd'], window: ['#ffd98a', '#c8d8ea'],
+    canopy: 'round', hut: false, bigType: 'train', weather: null,
+  },
+  {
+    id: 'beach', name: 'SUMMER SHORE',
+    sky: [['#0a1836', '#2fa3e0'], ['#2b3f7a', '#7fd0f2'], ['#e8794a', '#ffe6b0']],
+    far: [['#16233f', '#6fa8bd'], ['#1d2c4d', '#8ec4d4']],
+    ground: [['#1a2740', '#e6cf9a'], ['#0e1728', '#c9ad74']],
+    road: '#123a4e', kerb: 'rgba(120,240,220,.75)', dash: 'rgba(200,255,250,.28)',
+    trunk: ['#2a2320', '#7a5a36'], leafLit: ['#1c4038', '#4fb87a'], leafDark: ['#13302c', '#2f8a58'],
+    wallIn: ['#1c2a3c', '#c98f6a'], wallTop: ['#243447', '#e8b088'],
+    wallFront: ['#2b3d52', '#f2c79c'], window: ['#ffd98a', '#8fd8e8'],
+    canopy: 'palm', hut: true, bigType: 'shark', weather: null,
+  },
+  {
+    id: 'snow', name: 'MIDWINTER',
+    sky: [['#0a1024', '#8fb6d8'], ['#1e2c50', '#bcd4e8'], ['#54648f', '#e8eef5']],
+    far: [['#182036', '#9fb2c8'], ['#212b46', '#b8c6d6']],
+    ground: [['#1c2438', '#dfe8f2'], ['#10162a', '#b9c8db']],
+    road: '#2a3450', kerb: 'rgba(180,225,255,.75)', dash: 'rgba(255,255,255,.45)',
+    trunk: ['#241c22', '#4a3830'], leafLit: ['#1f3a3a', '#5f8a72'], leafDark: ['#162b2c', '#3f6a56'],
+    wallIn: ['#1e2437', '#7f8ea3'], wallTop: ['#eaf2fb', '#ffffff'],
+    wallFront: ['#2a3147', '#9aa8bd'], window: ['#ffcf7a', '#ffe9b8'],
+    canopy: 'conifer', hut: true, bigType: 'sleigh', weather: 'snow',
+  },
+];
+let themeIdx = +(localStorage.getItem('poseRunnerTheme') || 0) % THEMES.length;
+let THEME = THEMES[themeIdx];
+
+// Fixed set recycled forever — allocating per frame would churn the heap for
+// something nobody can count.
+function makeFlakes() {
+  return Array.from({ length: 90 }, () => ({
+    x: Math.random(), y: Math.random(), r: 0.4 + Math.random() * 1.6,
+    sp: 0.25 + Math.random() * 0.5, ph: Math.random() * 7,
+  }));
+}
+
+function drawWeather() {
+  if (!g.flakes) return;
+  const t = g.t;
+  for (const f of g.flakes) {
+    const y = ((f.y + t * f.sp * 0.12) % 1) * H;
+    const x = (f.x * W + Math.sin(t * 0.8 + f.ph) * 14 - camX * UNIT() * 0.12 + W) % W;
+    ctx.fillStyle = `rgba(255,255,255,${0.35 + f.r * 0.28})`;
+    ctx.beginPath(); ctx.arc(x, y, f.r * (H / 900) * 1.6, 0, 7); ctx.fill();
+  }
+}
+
 // ---------- Sky cycle ----------
 // One body crosses the sky, sinks, and comes back up as the other. A full
 // moon-then-sun cycle takes SKY_PERIOD of distance, so it turns over roughly
@@ -1156,17 +1274,16 @@ function render(now) {
   const day = sk.dayness;
 
   const sky = ctx.createLinearGradient(0, 0, 0, hy * 1.15);
-  sky.addColorStop(0, mixCol('#0b0e2a', '#4aa8e8', day));
-  sky.addColorStop(0.62, mixCol('#2a1a5e', '#93cdf0', day));
-  sky.addColorStop(1, mixCol('#b03a8c', '#ffd9a8', day));
+  sky.addColorStop(0, mixCol(THEME.sky[0][0], THEME.sky[0][1], day));
+  sky.addColorStop(0.62, mixCol(THEME.sky[1][0], THEME.sky[1][1], day));
+  sky.addColorStop(1, mixCol(THEME.sky[2][0], THEME.sky[2][1], day));
   ctx.fillStyle = sky; ctx.fillRect(-90, -90, W + 180, hy * 1.15 + 90);
 
   drawCelestial(sk, hy);
 
   // city silhouettes, two parallax layers
   for (let layer = 0; layer < 2; layer++) {
-    ctx.fillStyle = mixCol(layer ? '#1b1440' : '#251a52',
-                           layer ? '#7c93bd' : '#93a8ce', day * 0.85);
+    ctx.fillStyle = mixCol(THEME.far[layer][0], THEME.far[layer][1], day * 0.85);
     const off = (g.dist * (layer ? 2.4 : 5)) % 4000 + camX * (layer ? 12 : 22);
     for (const b of buildings[layer]) {
       let bx = b.x - off; if (bx < -300) bx += 4000;
@@ -1181,8 +1298,8 @@ function render(now) {
 
   // ground
   const gnd = ctx.createLinearGradient(0, hy, 0, H);
-  gnd.addColorStop(0, mixCol('#171233', '#4a5b46', day * 0.8));
-  gnd.addColorStop(1, mixCol('#0d0a20', '#2e3a2c', day * 0.8));
+  gnd.addColorStop(0, mixCol(THEME.ground[0][0], THEME.ground[0][1], day * 0.8));
+  gnd.addColorStop(1, mixCol(THEME.ground[1][0], THEME.ground[1][1], day * 0.8));
   ctx.fillStyle = gnd; ctx.fillRect(-90, hy, W + 180, H - hy + 90);
 
   for (const o of scenerySorted) drawScenery(o, o.d - g.dist, day);
@@ -1193,18 +1310,18 @@ function render(now) {
     [screenX(ROAD_EDGE, SPAWN_Z), groundY(SPAWN_Z)],
     [screenX(ROAD_EDGE, 0), groundY(0)],
     [screenX(-ROAD_EDGE, 0), groundY(0)],
-  ], '#191631');
+  ], THEME.road);
 
   // neon curbs
   for (const s of [-1, 1]) {
     ctx.beginPath();
     ctx.moveTo(screenX(s * ROAD_EDGE, SPAWN_Z), groundY(SPAWN_Z));
     ctx.lineTo(screenX(s * ROAD_EDGE, 0), groundY(0));
-    ctx.strokeStyle = 'rgba(67,232,255,.8)'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.strokeStyle = THEME.kerb; ctx.lineWidth = 2.5; ctx.stroke();
   }
 
   // lane dashes, scrolling with distance
-  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2;
+  ctx.strokeStyle = THEME.dash; ctx.lineWidth = 2;
   for (const dx of DIVIDERS) {
     for (let k = 0; k < 20; k++) {
       const zStart = k * 4 - (g.dist % 4);
@@ -1260,6 +1377,8 @@ function render(now) {
     }
   }
 
+  drawWeather();
+
   if (g.hitFlash > 0.01) {
     ctx.fillStyle = `rgba(255,60,80,${g.hitFlash * 0.32})`;
     ctx.fillRect(-90, -90, W + 180, H + 180);
@@ -1309,6 +1428,8 @@ function drawObstacle(o, z) {
   // ---- train: a real box — roof + front + whichever side the camera can see
   // narrower than the 2.2 lane pitch so there is real clearance when you run
   // past one — otherwise the side wall is edge-on and its livery is unreadable
+  if (THEME.bigType === 'shark') { drawShark(o, z); return; }
+
   const TW = TRAIN_W, TH = TRAIN_H;
   // the nose may already be behind the player: clip it at the near plane so
   // the body keeps sweeping past instead of freezing in place
@@ -1400,6 +1521,84 @@ function drawObstacle(o, z) {
   ctx.fillStyle = '#fff3b0';
   ctx.beginPath(); ctx.arc(fx - fw * 0.3, fy - fh * 0.16, fw * 0.05, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(fx + fw * 0.3, fy - fh * 0.16, fw * 0.05, 0, 7); ctx.fill();
+}
+
+// A shark stands in for the train where the road is water. Same footprint and
+// the same lethal height, so nothing about the collision or the ride-on-top
+// rules changes — only what you see coming.
+function drawShark(o, z) {
+  const unit = UNIT();
+  const lane = LANES[o.lane];
+  const zF = Math.max(z, NEAR_CLIP), zB = z + o.depth;
+  const xL = lane - TRAIN_W / 2, xR = lane + TRAIN_W / 2;
+  const topY = (zz, f) => groundY(zz) - TRAIN_H * f * unit * proj(zz);
+
+  const BACK = '#3f5a70', BELLY = '#cfdbe2', FIN = '#33495c';
+  const wake = Math.sin(g.dist * 1.2 + o.d) * 0.04;
+
+  // body: a long wedge, widest a third of the way back
+  const seg = (f0, f1, col) => {
+    poly([[screenX(xL, zF), topY(zF, f0)], [screenX(xR, zF), topY(zF, f0)],
+          [screenX(xR, zB), topY(zB, f1)], [screenX(xL, zB), topY(zB, f1)]], col);
+  };
+  for (const wx of [xL, xR]) {
+    poly([[screenX(wx, zF), groundY(zF)], [screenX(wx, zF), topY(zF, 0.62)],
+          [screenX(wx, zB), topY(zB, 0.50)], [screenX(wx, zB), groundY(zB)]], BACK);
+  }
+  seg(0.62, 0.50, BACK);
+  seg(0.30, 0.26, BELLY);
+
+  // dorsal fin, riding above the surface
+  const fz = zF + o.depth * 0.34, fp = proj(fz), fx = screenX(lane, fz);
+  const fy = groundY(fz);
+  ctx.fillStyle = FIN;
+  ctx.beginPath();
+  ctx.moveTo(fx - 0.55 * unit * fp, fy - TRAIN_H * 0.60 * unit * fp);
+  ctx.lineTo(fx + (0.12 + wake) * unit * fp, fy - TRAIN_H * 1.22 * unit * fp);
+  ctx.lineTo(fx + 0.60 * unit * fp, fy - TRAIN_H * 0.56 * unit * fp);
+  ctx.closePath(); ctx.fill();
+
+  // tail fin at the back
+  const tp = proj(zB), tx = screenX(lane, zB), ty = groundY(zB);
+  ctx.fillStyle = FIN;
+  ctx.beginPath();
+  ctx.moveTo(tx - 0.30 * unit * tp, ty - TRAIN_H * 0.38 * unit * tp);
+  ctx.lineTo(tx - 0.75 * unit * tp, ty - TRAIN_H * 1.05 * unit * tp);
+  ctx.lineTo(tx + 0.75 * unit * tp, ty - TRAIN_H * 1.00 * unit * tp);
+  ctx.lineTo(tx + 0.30 * unit * tp, ty - TRAIN_H * 0.36 * unit * tp);
+  ctx.closePath(); ctx.fill();
+
+  if (z < 0) return;   // past you: no snout to show
+
+  // snout, jaw and eyes
+  const pF = proj(zF), sx = screenX(lane, zF), sy = groundY(zF);
+  const w = TRAIN_W * unit * pF;
+  ctx.fillStyle = BACK;
+  ctx.beginPath();
+  ctx.moveTo(sx - w / 2, sy - TRAIN_H * 0.62 * unit * pF);
+  ctx.lineTo(sx, sy - TRAIN_H * 0.78 * unit * pF);
+  ctx.lineTo(sx + w / 2, sy - TRAIN_H * 0.62 * unit * pF);
+  ctx.lineTo(sx + w / 2, sy - TRAIN_H * 0.30 * unit * pF);
+  ctx.lineTo(sx - w / 2, sy - TRAIN_H * 0.30 * unit * pF);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#f3f7f9';
+  const jy = sy - TRAIN_H * 0.30 * unit * pF;
+  ctx.fillRect(sx - w * 0.40, jy, w * 0.80, TRAIN_H * 0.10 * unit * pF);
+  ctx.fillStyle = '#14202a';
+  const n = 7, tw = w * 0.80 / n;
+  for (let i = 0; i < n; i++) {
+    ctx.beginPath();
+    ctx.moveTo(sx - w * 0.40 + tw * i, jy);
+    ctx.lineTo(sx - w * 0.40 + tw * (i + 0.5), jy + TRAIN_H * 0.10 * unit * pF);
+    ctx.lineTo(sx - w * 0.40 + tw * (i + 1), jy);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = '#101a22';
+  for (const sgn of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(sx + sgn * w * 0.28, sy - TRAIN_H * 0.56 * unit * pF, w * 0.055, 0, 7);
+    ctx.fill();
+  }
 }
 
 function drawPickup(p, z) {
