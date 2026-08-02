@@ -2266,7 +2266,7 @@ let landmarker = null, video = null;
 let baseHipY = 0, baseShY = 0, baseCX = 0, baseTorso = 0.22;   // baseTorso = apparent shoulder width
 // the values calibration actually measured; the adaptive baseline is only
 // allowed to wander a bounded distance from them
-let calHipY = 0, calShY = 0, calCX = 0;
+let calHipY = 0, calShY = 0, calCX = 0, calSW = 0, calTL = 0;
 // Hip landmarks get unreliable when the lower body silhouette is hidden — a
 // long skirt or dress is the common case. Shoulders stay dependable, so the
 // detector degrades to an upper-body-only mode instead of going dead.
@@ -2382,6 +2382,7 @@ async function startPoseMode() {
 function startCalibration() {
   calibrated = false; calSamples = [];
   poseSmoothed = false; sRawV = null; sRawC = null; sVUp = 0; jumpHold = 0; swIdx = 0;
+  calSW = 0; calTL = 0;
   jumpArmed = true; laneArmed = true; laneStillSince = 0; laneHold = 0;
   phase = 'calibrating';
   showOverlay(`<div class="big-msg">Line yourself up</div><div class="sub">Step into the box in the camera preview, top left, and stand upright.<br>The box turns green when your framing is good — hold it for 2 seconds.<br>Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.</div>`);
@@ -2438,7 +2439,18 @@ function handlePose(result, now) {
   // Apparent body scale. Shoulder width, not shoulder-to-hip: crouching does
   // not make you narrower, but it does shorten the torso in frame, so a
   // torso-based scale moves for the very posture it is meant to measure.
-  const sw = Math.max(0.04, Math.abs(ls.x - rs.x) * aspect);
+  // Two independent estimates of apparent size, and we take whichever has
+  // shrunk *least*. Turning your torso foreshortens shoulder width but leaves
+  // shoulder-to-hip alone; crouching shortens shoulder-to-hip but leaves
+  // shoulder width alone. Either one used on its own collapses for the very
+  // motion the other is immune to, and since every signal is divided by this,
+  // that collapse lands on all of them — a 40 degree turn while side-stepping
+  // was reading as a crouch.
+  const swRaw = Math.max(0.03, Math.abs(ls.x - rs.x) * aspect);
+  const tlRaw = Math.max(0.03, (lh.y + rh.y) / 2 - (ls.y + rs.y) / 2);
+  const sw = (calSW > 0 && hipsUsable)
+    ? Math.max(swRaw / calSW, tlRaw / calTL) * calSW
+    : swRaw;
 
   // Everything below is measured from the optical axis (frame centre) and
   // divided by that scale. This is the fix for the whole class of bug where
@@ -2506,7 +2518,7 @@ function handlePose(result, now) {
       camStatus.textContent = fr.hint;
       return;
     }
-    calSamples.push({ cx, hipY: hipN, shoulderY: shoulderN, torso: sw });
+    calSamples.push({ cx, hipY: hipN, shoulderY: shoulderN, torso: sw, swRaw, tlRaw });
     camStatus.textContent = `Hold still… ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
     if (calSamples.length >= 50) {
       baseCX = avg(calSamples.map(s => s.cx));
@@ -2514,6 +2526,8 @@ function handlePose(result, now) {
       baseShY = avg(calSamples.map(s => s.shoulderY));
       baseTorso = avg(calSamples.map(s => s.torso));
       calHipY = baseHipY; calShY = baseShY; calCX = baseCX;
+      calSW = avg(calSamples.map(x => x.swRaw));
+      calTL = avg(calSamples.map(x => x.tlRaw));
       calibrated = true;
       prevVY = rawVs; prevCx = rawCs; laneArmed = true; laneStillSince = 0; laneHold = 0;
       postureStillSince = 0; duckSince = 0; duckPending = 0;
