@@ -2004,7 +2004,7 @@ let prevVY = 0, lastPoseAt = 0, lastDuckAt = 0, jumpArmed = true;
 let sRawV = null, sRawC = null, sVUp = 0, jumpHold = 0;
 const swBuf = new Array(5).fill(0); let swIdx = 0;
 let prevCx = 0, laneArmed = true, laneStillSince = 0;
-let postureStillSince = 0, duckSince = 0;
+let postureStillSince = 0, duckSince = 0, duckPending = 0;
 
 // Landmark x is normalised by frame WIDTH and y by frame HEIGHT, so on a 4:3
 // feed a horizontal move reads 33% smaller than the same distance vertically.
@@ -2241,7 +2241,7 @@ function handlePose(result, now) {
       calHipY = baseHipY; calShY = baseShY; calCX = baseCX;
       calibrated = true;
       prevVY = rawVs; prevCx = rawCs; laneArmed = true; laneStillSince = 0;
-      postureStillSince = 0; duckSince = 0;
+      postureStillSince = 0; duckSince = 0; duckPending = 0;
       lastPoseAt = now; jumpArmed = true; lastDuckAt = 0;
       setPhase('ready');
       camStatus.textContent = 'Calibrated';
@@ -2264,14 +2264,6 @@ function handlePose(result, now) {
   const rise = baseVY - vy;                            // + = body above baseline
   const dx = sCx - baseCX;                             // already in shoulder-widths
 
-  // Crouch: whichever drops further. A squat lowers both; bending forward at
-  // the waist lowers the shoulders while the hips barely move, and that used
-  // to go completely unnoticed.
-  const shDrop = sShY - baseShY;
-  const drop = hipsUsable ? Math.max(shDrop, sHipY - baseHipY) : shDrop;
-  g.poseDuck = drop > th.duck;
-  if (g.poseDuck) { lastDuckAt = now; if (!duckSince) duckSince = now; } else duckSince = 0;
-
   const vUpRaw = (prevVY - rawVs) / dt / scale;       // shoulder-widths / second
   prevVY = rawVs;
   // A real take-off holds its speed for several frames; landmark noise spikes
@@ -2279,6 +2271,30 @@ function handlePose(result, now) {
   // threshold while halving anything that only lasts a frame.
   sVUp += (vUpRaw - sVUp) * 0.5;
   const vUp = sVUp;
+
+  // Crouch: whichever drops further. A squat lowers both; bending forward at
+  // the waist lowers the shoulders while the hips barely move, and that used
+  // to go completely unnoticed.
+  //
+  // But a jump *begins* by sinking to load the legs, and that dip is as deep
+  // as a shallow crouch. Committing on the first frame over the line read
+  // every jump as a crouch — and then poisoned lastDuckAt, so the 300ms
+  // no-jump-after-crouch guard blocked the very jump the dip was preparing.
+  // A crouch is a posture you hold; a loading dip lasts about a tenth of a
+  // second and turns straight into upward speed. So: hold it briefly before
+  // committing, drop the pending state the moment a take-off shows up, and
+  // let a genuinely deep squat through immediately.
+  const shDrop = sShY - baseShY;
+  const drop = hipsUsable ? Math.max(shDrop, sHipY - baseHipY) : shDrop;
+  if (drop > th.duck) { if (!duckPending) duckPending = now; }
+  else if (drop < th.duck * 0.7) duckPending = 0;
+  if (vUp > 1.4) duckPending = 0;
+  // Every crouch goes through the hold, including deep ones. An immediate
+  // path for deep drops sounds harmless but bypasses the take-off check, and
+  // a deep loading dip before a big jump is exactly what lands in it.
+  const heldLongEnough = duckPending && now - duckPending > 120;
+  g.poseDuck = heldLongEnough && drop > th.duck * 0.7;
+  if (g.poseDuck) { lastDuckAt = now; if (!duckSince) duckSince = now; } else duckSince = 0;
 
   // Adaptive baseline. "Where do you actually stand" is a question about
   // whether you are moving, not about how close you are to the previous
