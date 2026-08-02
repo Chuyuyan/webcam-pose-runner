@@ -1,3 +1,6 @@
+// Vendored from the playkit SDK — do not edit here.
+// Source: playkit/sdk/src/index.ts
+// Re-sync with: npm run vendor  (in playkit/sdk)
 // src/index.ts
 var PlaykitError = class extends Error {
   status;
@@ -20,6 +23,21 @@ var SaveConflictError = class extends PlaykitError {
 function createPlaykit(options) {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const { gameId } = options;
+  const hintKey = `playkit_seen:${baseUrl}`;
+  function setSessionHint(on) {
+    try {
+      if (on) localStorage.setItem(hintKey, "1");
+      else localStorage.removeItem(hintKey);
+    } catch {
+    }
+  }
+  function hasSessionHint() {
+    try {
+      return localStorage.getItem(hintKey) === "1";
+    } catch {
+      return true;
+    }
+  }
   let accessToken = null;
   let currentUser = null;
   let refreshInFlight = null;
@@ -59,11 +77,13 @@ function createPlaykit(options) {
           if (!res.ok) {
             accessToken = null;
             setUser(null);
+            setSessionHint(false);
             return false;
           }
           const body = await res.json();
           accessToken = body.accessToken;
           setUser(body.user);
+          setSessionHint(true);
           return true;
         } catch {
           return false;
@@ -91,6 +111,7 @@ function createPlaykit(options) {
     const body = await parse(res);
     accessToken = body.accessToken;
     setUser(body.user);
+    setSessionHint(true);
     return body.user;
   }
   return {
@@ -103,8 +124,12 @@ function createPlaykit(options) {
     /**
      * Call once on load. Silently resumes a session from a previous visit
      * (using the refresh cookie) and returns the user, or null if not signed in.
+     *
+     * Costs nothing for a player who has never signed in on this browser: it
+     * returns without touching the network at all.
      */
     async restore() {
+      if (!hasSessionHint()) return null;
       await refresh();
       return currentUser;
     },
@@ -146,6 +171,7 @@ function createPlaykit(options) {
       } finally {
         accessToken = null;
         setUser(null);
+        setSessionHint(false);
       }
     },
     async setDisplayName(displayName) {
