@@ -860,9 +860,17 @@ function spawnScenery(d) {
     if (Math.random() < 0.22) continue;                 // gaps in the row
     const x = side * (VERGE + Math.random() * 5.5);
     const seed = Math.random();
-    if (park || Math.random() < 0.28) {
-      g.scenery.push({ type: 'tree', d, x, seed,
-        h: rand(2.4, 4.6), r: rand(0.85, 1.5) });
+    const set = THEME.verge;
+    const pick = (park && set.includes('tree')) ? 'tree'
+      : set[Math.floor(Math.random() * set.length)];
+    if (pick === 'tree') {
+      g.scenery.push({ type: 'tree', d, x, seed, h: rand(2.4, 4.6), r: rand(0.85, 1.5) });
+    } else if (pick === 'palm') {
+      g.scenery.push({ type: 'tree', d, x, seed, h: rand(3.0, 5.2), r: rand(1.0, 1.6) });
+    } else if (pick === 'buoy') {
+      g.scenery.push({ type: 'buoy', d, x, seed, h: rand(0.9, 1.6) });
+    } else if (pick === 'rock') {
+      g.scenery.push({ type: 'rock', d, x, seed, r: rand(0.6, 1.5) });
     } else {
       g.scenery.push({ type: 'block', d, x, seed,
         w: rand(1.8, 3.6), dep: rand(2.0, 4.5), h: rand(3.5, 13) });
@@ -924,6 +932,41 @@ function drawScenery(o, z, day) {
         ctx.fill();
       }
     }
+    return;
+  }
+
+  if (o.type === 'buoy') {
+    const gx = screenX(o.x, zF), gyy = groundY(zF);
+    const bob = Math.sin(g.t * 1.6 + o.seed * 9) * 0.10;
+    const hh = (o.h + bob) * unit * pF, r = 0.30 * unit * pF;
+    ctx.strokeStyle = '#c9503f'; ctx.lineWidth = r * 0.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(gx, gyy - hh * 0.25); ctx.lineTo(gx, gyy - hh); ctx.stroke();
+    ctx.fillStyle = '#e8624a';
+    ctx.beginPath(); ctx.ellipse(gx, gyy - hh * 0.22, r * 1.5, r, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f7d9a0';
+    ctx.beginPath(); ctx.arc(gx, gyy - hh, r * 0.5, 0, 7); ctx.fill();
+    // the ripple it sits in
+    ctx.strokeStyle = 'rgba(200,255,250,.30)'; ctx.lineWidth = Math.max(1, r * 0.2);
+    ctx.beginPath(); ctx.ellipse(gx, gyy - hh * 0.14, r * 2.4, r * 0.7, 0, 0, 7); ctx.stroke();
+    return;
+  }
+
+  if (o.type === 'rock') {
+    const gx = screenX(o.x, zF), gyy = groundY(zF), r = o.r * unit * pF;
+    ctx.fillStyle = mixCol('#20303c', '#6d7b80', day);
+    ctx.beginPath();
+    ctx.moveTo(gx - r, gyy);
+    ctx.lineTo(gx - r * 0.55, gyy - r * 0.95);
+    ctx.lineTo(gx + r * 0.15, gyy - r * 1.25);
+    ctx.lineTo(gx + r * 0.85, gyy - r * 0.6);
+    ctx.lineTo(gx + r, gyy);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.16)';
+    ctx.beginPath();
+    ctx.moveTo(gx - r * 0.55, gyy - r * 0.95);
+    ctx.lineTo(gx + r * 0.15, gyy - r * 1.25);
+    ctx.lineTo(gx + r * 0.1, gyy - r * 0.7);
+    ctx.closePath(); ctx.fill();
     return;
   }
 
@@ -1127,6 +1170,7 @@ const THEMES = [
     wallIn: ['#1a1530', '#6a7590'], wallTop: ['#241d3e', '#8794ad'],
     wallFront: ['#2b2247', '#9aa6bd'], window: ['#ffd98a', '#c8d8ea'],
     canopy: 'round', hut: false, bigType: 'train', weather: null,
+    verge: ['tree', 'block'], farShape: 'city',
   },
   {
     id: 'beach', name: 'SUMMER SHORE',
@@ -1138,6 +1182,9 @@ const THEMES = [
     wallIn: ['#1c2a3c', '#c98f6a'], wallTop: ['#243447', '#e8b088'],
     wallFront: ['#2b3d52', '#f2c79c'], window: ['#ffd98a', '#8fd8e8'],
     canopy: 'palm', hut: true, bigType: 'shark', weather: null,
+    // open water: no tower blocks anywhere, and the far layer is islands
+    verge: ['palm', 'buoy', 'rock'], farShape: 'islands',
+    islandLit: '#2c5f6e', islandDark: '#1d4351',
   },
   {
     id: 'snow', name: 'MIDWINTER',
@@ -1149,6 +1196,7 @@ const THEMES = [
     wallIn: ['#1e2437', '#7f8ea3'], wallTop: ['#eaf2fb', '#ffffff'],
     wallFront: ['#2a3147', '#9aa8bd'], window: ['#ffcf7a', '#ffe9b8'],
     canopy: 'conifer', hut: true, bigType: 'sleigh', weather: 'snow',
+    verge: ['tree', 'block'], farShape: 'city',
   },
 ];
 let themeIdx = +(localStorage.getItem('poseRunnerTheme') || 0) % THEMES.length;
@@ -1288,7 +1336,16 @@ function render(now) {
     for (const b of buildings[layer]) {
       let bx = b.x - off; if (bx < -300) bx += 4000;
       if (bx > W + 200) continue;
-      ctx.fillRect(bx, hy - b.h * H, b.w, b.h * H + 2);
+      if (THEME.farShape === 'islands') {
+        // low rounded humps: a coastline, not a skyline
+        const hgt = b.h * H * 0.55, wid = b.w * 2.2;
+        ctx.beginPath();
+        ctx.moveTo(bx - wid * 0.2, hy + 2);
+        ctx.quadraticCurveTo(bx + wid * 0.3, hy - hgt, bx + wid * 0.8, hy + 2);
+        ctx.closePath(); ctx.fill();
+      } else {
+        ctx.fillRect(bx, hy - b.h * H, b.w, b.h * H + 2);
+      }
     }
   }
 
@@ -1530,74 +1587,93 @@ function drawShark(o, z) {
   const unit = UNIT();
   const lane = LANES[o.lane];
   const zF = Math.max(z, NEAR_CLIP), zB = z + o.depth;
-  const xL = lane - TRAIN_W / 2, xR = lane + TRAIN_W / 2;
-  const topY = (zz, f) => groundY(zz) - TRAIN_H * f * unit * proj(zz);
+  const W_ = TRAIN_W * 0.92, H_ = TRAIN_H * 0.80;
+  const xL = lane - W_ / 2, xR = lane + W_ / 2;
+  const topY = zz => groundY(zz) - H_ * unit * proj(zz);
 
-  const BACK = '#3f5a70', BELLY = '#cfdbe2', FIN = '#33495c';
-  const wake = Math.sin(g.dist * 1.2 + o.d) * 0.04;
+  const BACK = '#3d5b72', SIDE = '#31495c', BELLY = '#dce7ec', FIN = '#283d4d';
 
-  // body: a long wedge, widest a third of the way back
-  const seg = (f0, f1, col) => {
-    poly([[screenX(xL, zF), topY(zF, f0)], [screenX(xR, zF), topY(zF, f0)],
-          [screenX(xR, zB), topY(zB, f1)], [screenX(xL, zB), topY(zB, f1)]], col);
-  };
+  // The same closed box the trains use. Two earlier attempts at a rounded,
+  // tapered body read as a stack of discs up close and as a grey slab far
+  // away; the box renders clean from every angle, so the identity is carried
+  // by the face on the front instead of by the silhouette.
   for (const wx of [xL, xR]) {
-    poly([[screenX(wx, zF), groundY(zF)], [screenX(wx, zF), topY(zF, 0.62)],
-          [screenX(wx, zB), topY(zB, 0.50)], [screenX(wx, zB), groundY(zB)]], BACK);
+    poly([[screenX(wx, zF), groundY(zF)], [screenX(wx, zF), topY(zF)],
+          [screenX(wx, zB), topY(zB)], [screenX(wx, zB), groundY(zB)]], SIDE);
   }
-  seg(0.62, 0.50, BACK);
-  seg(0.30, 0.26, BELLY);
+  poly([[screenX(xL, zF), topY(zF)], [screenX(xR, zF), topY(zF)],
+        [screenX(xR, zB), topY(zB)], [screenX(xL, zB), topY(zB)]], BACK);
+  poly([[screenX(xL, zB), groundY(zB)], [screenX(xR, zB), groundY(zB)],
+        [screenX(xR, zB), topY(zB)], [screenX(xL, zB), topY(zB)]], SIDE);
 
-  // dorsal fin, riding above the surface
-  const fz = zF + o.depth * 0.34, fp = proj(fz), fx = screenX(lane, fz);
-  const fy = groundY(fz);
-  ctx.fillStyle = FIN;
-  ctx.beginPath();
-  ctx.moveTo(fx - 0.55 * unit * fp, fy - TRAIN_H * 0.60 * unit * fp);
-  ctx.lineTo(fx + (0.12 + wake) * unit * fp, fy - TRAIN_H * 1.22 * unit * fp);
-  ctx.lineTo(fx + 0.60 * unit * fp, fy - TRAIN_H * 0.56 * unit * fp);
-  ctx.closePath(); ctx.fill();
+  // tail, out the back
+  const pB = proj(zB), tx = screenX(lane, zB), tg = groundY(zB);
+  const sway = Math.sin(g.t * 3.4 + o.d) * 0.42;
+  poly([
+    [tx, tg - H_ * 0.45 * unit * pB],
+    [tx + (0.22 + sway) * unit * pB, tg - H_ * 1.75 * unit * pB],
+    [tx + (0.80 + sway) * unit * pB, tg - H_ * 0.75 * unit * pB],
+    [tx + (0.36 + sway) * unit * pB, tg + H_ * 0.18 * unit * pB],
+  ], FIN);
 
-  // tail fin at the back
-  const tp = proj(zB), tx = screenX(lane, zB), ty = groundY(zB);
-  ctx.fillStyle = FIN;
-  ctx.beginPath();
-  ctx.moveTo(tx - 0.30 * unit * tp, ty - TRAIN_H * 0.38 * unit * tp);
-  ctx.lineTo(tx - 0.75 * unit * tp, ty - TRAIN_H * 1.05 * unit * tp);
-  ctx.lineTo(tx + 0.75 * unit * tp, ty - TRAIN_H * 1.00 * unit * tp);
-  ctx.lineTo(tx + 0.30 * unit * tp, ty - TRAIN_H * 0.36 * unit * tp);
-  ctx.closePath(); ctx.fill();
+  // dorsal fin along the back
+  const zD0 = zF + (zB - zF) * 0.22, zD1 = zF + (zB - zF) * 0.62;
+  const pD0 = proj(zD0), pD1 = proj(zD1);
+  poly([
+    [screenX(lane - 0.18, zD0), topY(zD0)],
+    [screenX(lane + 0.30, zD0), groundY(zD0) - H_ * 1.72 * unit * pD0],
+    [screenX(lane + 0.12, zD1), topY(zD1)],
+  ], FIN);
 
-  if (z < 0) return;   // past you: no snout to show
+  if (z < 0) return;
 
-  // snout, jaw and eyes
-  const pF = proj(zF), sx = screenX(lane, zF), sy = groundY(zF);
-  const w = TRAIN_W * unit * pF;
+  // The face. Snout wedge at the top, a mouth across the middle where it is
+  // actually visible — the first attempt put the jaw down at the waterline,
+  // exactly where the player stands, and hid the only identifying feature.
+  const pF = proj(zF), fx = screenX(lane, zF), fg = groundY(zF);
+  const fw = W_ * unit * pF, fh = H_ * unit * pF;
+  const top = fg - fh;
+
   ctx.fillStyle = BACK;
   ctx.beginPath();
-  ctx.moveTo(sx - w / 2, sy - TRAIN_H * 0.62 * unit * pF);
-  ctx.lineTo(sx, sy - TRAIN_H * 0.78 * unit * pF);
-  ctx.lineTo(sx + w / 2, sy - TRAIN_H * 0.62 * unit * pF);
-  ctx.lineTo(sx + w / 2, sy - TRAIN_H * 0.30 * unit * pF);
-  ctx.lineTo(sx - w / 2, sy - TRAIN_H * 0.30 * unit * pF);
+  ctx.moveTo(fx - fw / 2, top + fh * 0.30);
+  ctx.lineTo(fx, top - fh * 0.14);
+  ctx.lineTo(fx + fw / 2, top + fh * 0.30);
+  ctx.lineTo(fx + fw / 2, fg);
+  ctx.lineTo(fx - fw / 2, fg);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#f3f7f9';
-  const jy = sy - TRAIN_H * 0.30 * unit * pF;
-  ctx.fillRect(sx - w * 0.40, jy, w * 0.80, TRAIN_H * 0.10 * unit * pF);
-  ctx.fillStyle = '#14202a';
-  const n = 7, tw = w * 0.80 / n;
+
+  ctx.fillStyle = BELLY;
+  ctx.beginPath();
+  ctx.ellipse(fx, fg - fh * 0.10, fw * 0.44, fh * 0.20, 0, 0, 7);
+  ctx.fill();
+
+  const my = fg - fh * 0.42, mw = fw * 0.78;
+  ctx.fillStyle = '#13212b';
+  ctx.beginPath();
+  ctx.moveTo(fx - mw / 2, my - fh * 0.10);
+  ctx.quadraticCurveTo(fx, my + fh * 0.30, fx + mw / 2, my - fh * 0.10);
+  ctx.quadraticCurveTo(fx, my + fh * 0.02, fx - mw / 2, my - fh * 0.10);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = '#f8fbfc';
+  const n = 9;
   for (let i = 0; i < n; i++) {
+    const u = i / n, u1 = (i + 1) / n;
+    const px0 = fx - mw / 2 + mw * u, px1 = fx - mw / 2 + mw * u1;
+    const dip = k => my - fh * 0.10 + fh * 0.30 * Math.sin(k * Math.PI);
     ctx.beginPath();
-    ctx.moveTo(sx - w * 0.40 + tw * i, jy);
-    ctx.lineTo(sx - w * 0.40 + tw * (i + 0.5), jy + TRAIN_H * 0.10 * unit * pF);
-    ctx.lineTo(sx - w * 0.40 + tw * (i + 1), jy);
+    ctx.moveTo(px0, dip(u) - fh * 0.06);
+    ctx.lineTo((px0 + px1) / 2, dip((u + u1) / 2) + fh * 0.05);
+    ctx.lineTo(px1, dip(u1) - fh * 0.06);
     ctx.closePath(); ctx.fill();
   }
-  ctx.fillStyle = '#101a22';
+
   for (const sgn of [-1, 1]) {
-    ctx.beginPath();
-    ctx.arc(sx + sgn * w * 0.28, sy - TRAIN_H * 0.56 * unit * pF, w * 0.055, 0, 7);
-    ctx.fill();
+    ctx.fillStyle = '#f2f7f9';
+    ctx.beginPath(); ctx.arc(fx + sgn * fw * 0.30, top + fh * 0.36, fw * 0.075, 0, 7); ctx.fill();
+    ctx.fillStyle = '#0b141a';
+    ctx.beginPath(); ctx.arc(fx + sgn * fw * 0.30, top + fh * 0.36, fw * 0.042, 0, 7); ctx.fill();
   }
 }
 
@@ -2202,7 +2278,7 @@ let sHipY = 0, sShY = 0, sCx = 0, sTorso = 0.25, poseSmoothed = false;
 let prevVY = 0, lastPoseAt = 0, lastDuckAt = 0, jumpArmed = true;
 let sRawV = null, sRawC = null, sVUp = 0, jumpHold = 0;
 const swBuf = new Array(5).fill(0); let swIdx = 0;
-let prevCx = 0, laneArmed = true, laneStillSince = 0;
+let prevCx = 0, laneArmed = true, laneStillSince = 0, laneHold = 0;
 let postureStillSince = 0, duckSince = 0, duckPending = 0;
 
 // Landmark x is normalised by frame WIDTH and y by frame HEIGHT, so on a 4:3
@@ -2306,7 +2382,7 @@ async function startPoseMode() {
 function startCalibration() {
   calibrated = false; calSamples = [];
   poseSmoothed = false; sRawV = null; sRawC = null; sVUp = 0; jumpHold = 0; swIdx = 0;
-  jumpArmed = true; laneArmed = true; laneStillSince = 0;
+  jumpArmed = true; laneArmed = true; laneStillSince = 0; laneHold = 0;
   phase = 'calibrating';
   showOverlay(`<div class="big-msg">Line yourself up</div><div class="sub">Step into the box in the camera preview, top left, and stand upright.<br>The box turns green when your framing is good — hold it for 2 seconds.<br>Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.</div>`);
 }
@@ -2439,7 +2515,7 @@ function handlePose(result, now) {
       baseTorso = avg(calSamples.map(s => s.torso));
       calHipY = baseHipY; calShY = baseShY; calCX = baseCX;
       calibrated = true;
-      prevVY = rawVs; prevCx = rawCs; laneArmed = true; laneStillSince = 0;
+      prevVY = rawVs; prevCx = rawCs; laneArmed = true; laneStillSince = 0; laneHold = 0;
       postureStillSince = 0; duckSince = 0; duckPending = 0;
       lastPoseAt = now; jumpArmed = true; lastDuckAt = 0;
       setPhase('ready');
@@ -2550,15 +2626,21 @@ function handlePose(result, now) {
   const vLat = Math.abs(prevCx - rawCs) * aspect / dt / scale;     // shoulder-widths/sec
   prevCx = rawCs;
 
-  if (laneArmed && Math.abs(dx) > th.lane) {
+  // Two ways over the line, mirroring the jump. The distance gate alone is
+  // unavoidably late: you have to travel the whole 0.34 before anything
+  // happens. A decisive step is moving fast well before it gets there, so
+  // speed lets it fire at 55% of the distance. Both paths then have to hold
+  // for two frames, which a one-frame landmark spike cannot do.
+  const laneFast = Math.abs(vLat) > 2.4 && Math.abs(dx) > th.lane * 0.55;
+  if (laneFast || Math.abs(dx) > th.lane) laneHold++; else laneHold = 0;
+  if (laneArmed && laneHold >= 2) {
     const dir = Math.sign(dx);
     const next = clamp(g.lane + dir, 0, 2);
     if (next !== g.lane) setLane(next);
     // Move the neutral point to the crossing itself, so the rest of *this*
     // stride cannot immediately re-cross and take a second lane.
     baseCX = clamp(baseCX + dir * th.lane, calCX - 1.6, calCX + 1.6);
-    laneArmed = false;
-    laneStillSince = 0;
+    laneArmed = false; laneHold = 0; laneStillSince = 0;
   }
   if (!laneArmed) {
     // Re-arm on the deceleration between steps, not on standing still. Two
@@ -2682,6 +2764,9 @@ window.__dbg = {
     render(performance.now());
   },
   startPlay, doJump, doDuck, setLane,
+  get theme() { return THEME.id; },
+  setTheme(id) { themeIdx = THEMES.findIndex(t => t.id === id); THEME = THEMES[themeIdx];
+    g.flakes = THEME.weather === 'snow' ? makeFlakes() : null; },
   music,
   // pose internals, so the detector can be driven with synthetic landmarks
   handlePose, startCalibration, poseTh, drawCam,
