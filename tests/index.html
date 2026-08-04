@@ -1,0 +1,495 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Pose Runner — tests</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 28px 22px 60px; background: #0a0e1e; color: #dbe4f3;
+         font: 14px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  h1 { font-size: 20px; letter-spacing: .5px; margin: 0 0 4px; }
+  .sub { color: #8fa6bd; font-size: 13px; margin-bottom: 20px; }
+  button { font: inherit; font-weight: 700; padding: 9px 18px; border-radius: 9px; border: none;
+           background: #43e8ff; color: #06121a; cursor: pointer; }
+  button.ghost { background: none; color: #cfe3f5; border: 1px solid #35507a; }
+  table { border-collapse: collapse; width: 100%; max-width: 1000px; margin-top: 18px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+       color: #8fa6bd; border-bottom: 1px solid #2a3350; padding: 6px 10px 6px 0; font-weight: 600; }
+  td { padding: 5px 10px 5px 0; border-bottom: 1px solid #171d33; vertical-align: top; }
+  td.v { font-variant-numeric: tabular-nums; color: #9fb4c8; }
+  .suite td { padding-top: 16px; color: #fff; font-weight: 700; letter-spacing: .04em; }
+  .pass { color: #46d17f; } .fail { color: #ff6b7d; } .skip { color: #8a93ab; }
+  #summary { margin-top: 22px; font-size: 15px; font-weight: 700; }
+  iframe { position: fixed; left: -9999px; top: 0; border: 0; }
+  code { color: #ffd23f; }
+</style>
+
+<h1>Pose Runner — test suite</h1>
+<div class="sub">
+  Drives the real page in a hidden iframe through <code>window.__dbg</code>. No build step and no
+  dependencies: serve the repo (<code>python3 serve.py 5175</code>) and open this file.
+</div>
+<button id="run">Run all</button>
+<button class="ghost" id="rerun-rec">Replay recordings only</button>
+<div id="out"></div>
+<div id="summary"></div>
+<iframe id="game" src="../index.html" width="1280" height="720"></iframe>
+
+<script type="module">
+const out = document.getElementById('out');
+const frame = document.getElementById('game');
+let table, pass = 0, fail = 0, skip = 0;
+
+const esc = t => String(t).replace(/[<&]/g, c => ({ '<': '&lt;', '&': '&amp;' }[c]));
+function suite(name) {
+  const tr = table.insertRow(); tr.className = 'suite';
+  tr.insertCell().colSpan = 4; tr.cells[0].textContent = name;
+}
+function row(name, ok, detail) {
+  const tr = table.insertRow();
+  tr.insertCell().innerHTML = `<span class="${ok}">${ok === 'pass' ? 'PASS' : ok === 'fail' ? 'FAIL' : 'SKIP'}</span>`;
+  tr.insertCell().textContent = name;
+  const c = tr.insertCell(); c.className = 'v'; c.innerHTML = esc(detail ?? '');
+  if (ok === 'pass') pass++; else if (ok === 'fail') fail++; else skip++;
+}
+const check = (name, cond, detail) => row(name, cond ? 'pass' : 'fail', detail);
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+function reload() {
+  return new Promise(res => {
+    frame.onload = () => setTimeout(() => res(frame.contentWindow), 60);
+    frame.contentWindow.location.reload();
+  });
+}
+const keys = w => { w.document.getElementById('btn-keys').click(); };
+
+// ------------------------------------------------------------------
+// A synthetic human. Not a rigid body: the torso turns as it steps, the
+// bob couples to the sway, and the landmark noise arrives in bursts —
+// every one of those was added after a real bug slipped past the version
+// without it.
+// ------------------------------------------------------------------
+function makeHuman() {
+  let burst = 0;
+  return o => {
+    const { dist = 1, cx = 0, sink = 0, above = 0.38, shW = 0.26, torso = 0.30,
+            yaw = 0, jit = 0.008 } = o;
+    if (Math.random() < 0.04) burst = 6;
+    const amp = jit * (burst > 0 ? 3.2 : 1); if (burst > 0) burst--;
+    const n = () => (Math.random() - 0.5) * 2 * amp;
+    const k = 1 / dist, a = -above + sink, b = a + torso;
+    const lm = []; for (let i = 0; i < 33; i++) lm.push({ x: 0.5, y: 0.5, visibility: 1 });
+    const X = 0.5 - cx * k, hw = shW * k * Math.cos(yaw) / 2 / (4 / 3), tilt = Math.sin(yaw) * 0.012 * k;
+    lm[11] = { x: X - hw + n() * 0.3, y: 0.5 + a * k - tilt + n(), visibility: 1 };
+    lm[12] = { x: X + hw + n() * 0.3, y: 0.5 + a * k + tilt + n(), visibility: 1 };
+    lm[23] = { x: X - hw * 0.8 + n() * 0.3, y: 0.5 + b * k + n(), visibility: 1 };
+    lm[24] = { x: X + hw * 0.8 + n() * 0.3, y: 0.5 + b * k + n(), visibility: 1 };
+    return { landmarks: [lm] };
+  };
+}
+
+function poseHarness(w) {
+  const d = w.__dbg, g = w.__g, human = makeHuman();
+  let t = 0;
+  const feed = o => { t += 33; d.handlePose(human(o), t); };
+  const calibrate = (o = {}) => {
+    d.startCalibration();
+    for (let i = 0; i < 80; i++) feed({ ...o, jit: 0.003 });
+    d.startPlay();
+  };
+  let jumps = 0, air = false, duckFrames = 0, lanes = 0, lane = g.lane;
+  const watch = () => {
+    if (!g.grounded && !air) jumps++;
+    air = !g.grounded;
+    if (g.poseDuck) duckFrames++;
+    if (g.lane !== lane) { lanes++; lane = g.lane; }
+  };
+  const reset = () => { jumps = 0; air = !g.grounded; duckFrames = 0; lanes = 0; lane = g.lane; };
+  return { feed, calibrate, watch, reset, get counts() { return { jumps, duckFrames, lanes }; } };
+}
+
+// ------------------------------------------------------------------
+async function suiteProjection() {
+  suite('Projection — the camera must sit at the same height on every screen');
+  const w = frame.contentWindow;
+  const shapes = [
+    ['desktop 16:9', 1280, 720, 2.64, 0.10],
+    ['laptop 16:10', 1440, 900, 2.64, 0.10],
+    ['phone portrait', 375, 812, 4.44, 0.25],
+    ['tablet portrait', 768, 1024, 3.97, 0.25],
+  ];
+  for (const [name, W, H, want, tol] of shapes) {
+    frame.width = W; frame.height = H;
+    await new Promise(r => setTimeout(r, 40));
+    w.dispatchEvent(new Event('resize'));
+    const l = w.__dbg.layout();
+    check(`${name} — camera height`, near(l.camElev, want, tol),
+      `${l.camElev.toFixed(2)} units (want ${want} ±${tol}), ${l.W}x${l.H}`);
+    check(`${name} — road fits the screen`, (7.2 * l.unit) / l.W < 1.35,
+      `road is ${((7.2 * l.unit) / l.W).toFixed(2)}x the screen width`);
+  }
+  frame.width = 1280; frame.height = 720;
+  await new Promise(r => setTimeout(r, 40));
+  w.dispatchEvent(new Event('resize'));
+}
+
+async function suiteSyntheticPose() {
+  const w = await reload();
+  suite('Pose — synthetic human');
+  const h = poseHarness(w);
+
+  for (const deg of [0, 25, 40, 55]) {
+    h.calibrate(); h.reset();
+    for (let i = 0; i < 900; i++) {
+      const ph = Math.sin(i / 45);
+      h.feed({ cx: 0.10 * ph, yaw: (deg * Math.PI / 180) * ph,
+               sink: 0.012 * Math.abs(Math.sin(i / 22)), jit: 0.008 });
+      h.watch();
+    }
+    const c = h.counts;
+    check(`side sway with ${deg}° of torso turn fires nothing`,
+      c.jumps === 0 && c.duckFrames === 0,
+      `${c.jumps} jumps, ${c.duckFrames} crouch frames`);
+  }
+
+  for (const dist of [0.7, 1, 1.5]) {
+    h.calibrate({ dist }); h.reset();
+    for (let i = 0; i < 400; i++) { h.feed({ dist, sink: 0.012 * Math.abs(Math.sin(i / 22)) }); h.watch(); }
+    const c = h.counts;
+    check(`standing still at ${dist}x distance fires nothing`,
+      c.jumps === 0 && c.duckFrames === 0 && c.lanes === 0,
+      `${c.jumps} jumps, ${c.duckFrames} crouch frames, ${c.lanes} lane changes`);
+  }
+
+  h.calibrate(); h.reset();
+  for (let i = 1; i <= 6; i++) h.feed({ sink: -0.24 * (i / 6) });
+  for (let i = 6; i >= 1; i--) h.feed({ sink: -0.24 * (i / 6) });
+  for (let i = 0; i < 30; i++) { h.feed({}); h.watch(); }
+  let c = h.counts;
+  check('a real hop fires exactly one jump and no crouch',
+    c.jumps === 1 && c.duckFrames === 0, `${c.jumps} jumps, ${c.duckFrames} crouch frames`);
+
+  h.calibrate(); h.reset();
+  for (let i = 0; i < 20; i++) { h.feed({ sink: 0.091 }); h.watch(); }
+  c = h.counts;
+  check('a real crouch is held, not tapped', c.duckFrames >= 10 && c.jumps === 0,
+    `${c.duckFrames} crouch frames of 20`);
+
+  h.calibrate(); h.reset();
+  for (let i = 0; i < 12; i++) { h.feed({ cx: -0.30 * (i / 12) }); h.watch(); }
+  for (let i = 0; i < 12; i++) { h.feed({ cx: -0.30 }); h.watch(); }
+  c = h.counts;
+  check('one long stride moves exactly one lane', c.lanes === 1,
+    `${c.lanes} lane changes, ended in lane ${w.__g.lane}`);
+}
+
+async function suiteRoute() {
+  const w = await reload();
+  suite('Coins — the trail is a runnable route');
+  const g = w.__g, d = w.__dbg;
+  keys(w);
+  w.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' }));
+
+  const solidAt = (lane, z) => {
+    for (const o of g.obstacles) {
+      if (o.lane !== lane) continue;
+      if (o.d - 1.0 > z || o.d + o.depth + 1.0 < z) continue;
+      return o.type;
+    }
+    return null;
+  };
+  const seen = new Set();
+  let coins = 0, inTrain = 0, unreachable = 0, doubleJump = 0, walls = 0, sampled = 0;
+  const zSeen = new Set();
+  for (let i = 0; i < 20000; i++) {
+    g.invuln = 99;
+    d.step(1);
+    for (const c of g.pickups) {
+      if (c.type !== 'coin') continue;
+      const z = c.d - g.dist; if (z < 4 || z > 25) continue;
+      const k = Math.round(c.d * 100) + ':' + c.lane + ':' + Math.round(c.h * 100);
+      if (seen.has(k)) continue; seen.add(k); coins++;
+      const s = solidAt(c.lane, c.d);
+      if (s === 'train') inTrain++;
+      else if (s === 'hurdle' && c.h < 0.9) unreachable++;
+      else if (s === 'bar' && c.h > 1.0 && c.h < 2.0) unreachable++;
+    }
+    const st = g.pickups.filter(p => p.type === 'coin').sort((a, b) => a.d - b.d);
+    for (let k = 1; k < st.length; k++) {
+      const dz = st[k].d - st[k - 1].d;
+      if (dz > 1.6 && dz < 1.8 && Math.abs(st[k].lane - st[k - 1].lane) > 1) doubleJump++;
+    }
+    for (let z = Math.ceil(g.dist + 20); z < g.dist + 60; z++) {
+      if (zSeen.has(z)) continue; zSeen.add(z); sampled++;
+      const n = [0, 1, 2].filter(l =>
+        g.obstacles.some(o => o.lane === l && o.type === 'train' && o.d <= z && o.d + o.depth >= z)).length;
+      if (n === 3) walls++;
+    }
+  }
+  check('no coin sits inside a train', inTrain === 0, `${inTrain} of ${coins} coins`);
+  check('no coin is unreachable inside a hurdle or gate', unreachable === 0, `${unreachable} of ${coins}`);
+  check('no trail asks for a two-lane step', doubleJump === 0, `${doubleJump} found`);
+  check('no impassable wall of trains', walls === 0, `${walls} in ${sampled} units of road`);
+}
+
+async function suiteFollower() {
+  const w = await reload();
+  suite('Coins — following the trail must beat ignoring it');
+  const g = w.__g, d = w.__dbg;
+  keys(w);
+  const key = k => w.dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+  key('ArrowUp');
+  // A bot that looks at nothing but the coins. If the trail is the route,
+  // this survives better than a bot that holds the middle lane.
+  const trial = (follow, frames) => {
+    const d0 = g.dist, c0 = g.coins; let hits = 0;
+    for (let i = 0; i < frames; i++) {
+      if (follow) {
+        const ahead = g.pickups.filter(p => p.type === 'coin' && p.d - g.dist > 0.6).sort((a, b) => a.d - b.d);
+        const t = ahead[0];
+        if (t) {
+          const z = t.d - g.dist;
+          if (z < 9 && t.lane !== g.lane) key(t.lane < g.lane ? 'ArrowLeft' : 'ArrowRight');
+          const m = ahead.find(p => p.lane === g.lane && p.d - g.dist > 1.0 && p.d - g.dist < 3.0);
+          if (m) { if (m.h > 1.8) key('ArrowUp'); else if (m.h < 0.5) key('ArrowDown'); }
+        }
+      }
+      d.step(1);
+      if (g.hearts < 3) { hits += 3 - g.hearts; g.hearts = 3; }
+    }
+    return { hits: (hits / (g.dist - d0)) * 1000, coins: g.coins - c0 };
+  };
+  const a = trial(true, 30000), b = trial(false, 30000);
+  check('the coin follower takes fewer hits', a.hits < b.hits * 0.75,
+    `${a.hits.toFixed(1)} vs ${b.hits.toFixed(1)} hits per 1000 units`);
+  check('the coin follower collects far more', a.coins > b.coins * 2,
+    `${a.coins} vs ${b.coins} coins`);
+}
+
+async function suiteBoot() {
+  const w = await reload();
+  suite('The boot — off the line and out of standing reach');
+  const g = w.__g, d = w.__dbg;
+  keys(w);
+  const key = k => w.dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+  key('ArrowUp');
+
+  let grabbed = 0;
+  for (let i = 0; i < 20000; i++) {
+    g.invuln = 99; g.boostCooldown = 0;
+    const b = g.boost; d.step(1); if (g.boost > b + 0.5) grabbed++;
+  }
+  check('cannot be collected without ever jumping', grabbed === 0, `${grabbed} collected`);
+
+  const known = new WeakSet(); let n = 0, onLine = 0, tight = 0, minEscape = 99;
+  for (let i = 0; i < 20000; i++) {
+    g.invuln = 99; g.boostCooldown = 0;
+    const lineLane = g.lineLane;
+    d.step(1);
+    for (const p of g.pickups) {
+      if (p.type !== 'boost' || known.has(p)) continue; known.add(p); n++;
+      if (p.lane === lineLane) onLine++;
+      let clear = 99;
+      for (const o of g.obstacles) { if (o.lane !== p.lane) continue; const gap = o.d - p.d; if (gap >= 0 && gap < clear) clear = gap; }
+      if (clear < 8) tight++;
+      if (clear < minEscape) minEscape = clear;
+    }
+  }
+  check('mostly spawns off the coin line', n > 0 && onLine / n < 0.2,
+    `${onLine} of ${n} on the line`);
+  check('never spawns without room to escape its lane', tight === 0,
+    `tightest escape ${minEscape.toFixed(1)} units`);
+
+  let timed = 0, got = 0;
+  for (let i = 0; i < 20000; i++) {
+    g.invuln = 99; g.boostCooldown = 0;
+    const b = g.pickups.find(p => p.type === 'boost');
+    if (b) {
+      const z = b.d - g.dist, tt = z / g.speed;
+      if (z < 9 && b.lane !== g.lane) key(b.lane < g.lane ? 'ArrowLeft' : 'ArrowRight');
+      if (b.lane === g.lane && tt > 0.13 && tt < 0.19 && g.grounded) { timed++; key('ArrowUp'); }
+    }
+    const before = g.boost; d.step(1); if (g.boost > before + 0.5) got++;
+  }
+  check('a well-timed jump gets it', timed > 20 && got / timed > 0.8,
+    `${got} of ${timed} attempts`);
+}
+
+// ------------------------------------------------------------------
+// Replay: feed a recording's landmarks back through the detector and count
+// what it decides, segment by segment, against the segment's own label.
+// ------------------------------------------------------------------
+function replay(w, rec) {
+  const d = w.__dbg, g = w.__g;
+  const byStep = new Map();
+  for (const f of rec.frames) {
+    if (!byStep.has(f.s)) byStep.set(f.s, []);
+    byStep.get(f.s).push(f);
+  }
+  const toResult = f => {
+    const lm = []; for (let i = 0; i < 33; i++) lm.push({ x: 0.5, y: 0.5, visibility: 0 });
+    const idx = [11, 12, 23, 24];
+    for (let i = 0; i < 4; i++) lm[idx[i]] = { x: f.p[i * 3], y: f.p[i * 3 + 1], visibility: f.p[i * 3 + 2] };
+    return { landmarks: [lm] };
+  };
+  d.startCalibration();
+  for (const f of byStep.get('calibrate') || []) d.handlePose(toResult(f), f.t);
+  d.startPlay();
+
+  const results = [];
+  for (const step of rec.steps) {
+    if (!step.expect) continue;
+    const frames = byStep.get(step.id) || [];
+    if (!frames.length) { results.push({ step, frames: 0 }); continue; }
+    let jumps = 0, air = !g.grounded, crouches = 0, ducking = g.poseDuck, lanes = 0, lane = g.lane;
+    let prev = frames[0].t;
+    for (const f of frames) {
+      g.obstacles.length = 0; g.pickups.length = 0; g.invuln = 99;
+      d.handlePose(toResult(f), f.t);
+      d.step(1, Math.min(0.05, Math.max(0.001, (f.t - prev) / 1000)));
+      prev = f.t;
+      if (!g.grounded && !air) jumps++; air = !g.grounded;
+      if (g.poseDuck && !ducking) crouches++; ducking = g.poseDuck;
+      if (g.lane !== lane) { lanes++; lane = g.lane; }
+    }
+    results.push({ step, frames: frames.length, got: { jumps, crouches, laneChanges: lanes } });
+  }
+  return results;
+}
+
+// ------------------------------------------------------------------
+// The recorder, driven end to end off a synthetic clock. A human takes 73
+// seconds to walk the script; this walks it in a few thousand frames. It
+// proves the file the recorder writes is the file the replay can read —
+// which is the part worth knowing *before* somebody stands in front of a
+// camera for over a minute.
+// ------------------------------------------------------------------
+async function suiteRecorder() {
+  const w = await reload();
+  suite('Recorder — a synthetic session, recorded and replayed');
+  const d = w.__dbg, human = makeHuman();
+  const script = d.captureScript();
+
+  // What a cooperative human does during each prompt.
+  const motion = (id, t, secs) => {
+    switch (id) {
+      case 'still': case 'calibrate': return {};
+      case 'jog': return { sink: 0.012 * Math.abs(Math.sin(t * 9)) };
+      // A big turn with only the small drift a planted human cannot avoid.
+      case 'sway': { const ph = Math.sin(t * 1.4);
+        return { cx: 0.035 * ph, yaw: (40 * Math.PI / 180) * ph }; }
+      case 'jump3': {
+        for (const at of [1.5, 4.5, 7.5]) {
+          const u = (t - at) / 0.4;                     // a 0.4s hop
+          if (u >= 0 && u <= 1) return { sink: -0.24 * Math.sin(u * Math.PI) };
+        }
+        return {};
+      }
+      case 'crouch3': {
+        for (const at of [1.5, 5.0, 8.5]) {
+          if (t > at && t < at + 1.4) return { sink: 0.10 };
+        }
+        return {};
+      }
+      case 'left3': case 'right3': {
+        const dir = id === 'left3' ? -1 : 1, cycle = 4.0;
+        const u = t % cycle;
+        if (t > 3 * cycle) return {};
+        if (u < 0.4) return { cx: dir * 0.30 * (u / 0.4) };   // step out
+        if (u < 2.0) return { cx: dir * 0.30 };               // stand there
+        if (u < 2.4) return { cx: dir * 0.30 * (1 - (u - 2.0) / 0.4) };  // step back
+        return {};
+      }
+      default: return {};
+    }
+  };
+
+  let now = 0;
+  d.startCapture(now, false);
+  let rec = null;
+  for (const st of script) {
+    const t0 = now;
+    while (now - t0 <= st.secs * 1000 + 34 && !rec) {
+      rec = d.captureFrame(human({ ...motion(st.id, (now - t0) / 1000, st.secs), jit: 0.006 }), now) || null;
+      now += 33;
+    }
+    if (rec) break;
+  }
+
+  check('the recorder finishes and returns a file', !!rec, rec ? `${rec.frames.length} frames` : 'never finished');
+  if (!rec) return;
+  check('every prompt has its own labelled segment',
+    script.every(st => rec.frames.some(f => f.s === st.id)),
+    rec.steps.map(s => s.id).join(', '));
+  check('every frame carries four landmarks',
+    rec.frames.every(f => Array.isArray(f.p) && f.p.length === 12 && f.p.every(Number.isFinite)), '');
+  check('the file is small enough to live in the repo',
+    JSON.stringify(rec).length < 400e3, `${Math.round(JSON.stringify(rec).length / 1024)} KB`);
+
+  const w2 = await reload();
+  for (const r of replay(w2, rec)) {
+    if (!r.frames) { row(`replayed · ${r.step.id}`, 'skip', 'no frames'); continue; }
+    const bad = Object.entries(r.step.expect).filter(([k, v]) => r.got[k] !== v);
+    check(`replayed · ${r.step.id}`, bad.length === 0,
+      Object.entries(r.step.expect).map(([k, v]) => `${k} ${r.got[k]}/${v}`).join(', '));
+  }
+}
+
+// ------------------------------------------------------------------
+// Replaying a real recording. This is the only suite that can catch a
+// failure mode the synthetic human does not contain.
+// ------------------------------------------------------------------
+async function suiteRecordings() {
+  suite('Pose — replayed from a real camera');
+  let list = [];
+  try {
+    list = await (await fetch('recordings/index.json', { cache: 'no-store' })).json();
+  } catch (e) { /* none yet */ }
+  if (!list.length) {
+    row('no recordings found', 'skip',
+      'Record one: camera mode, press R, follow the prompts, drop the JSON into tests/recordings/ and add it to recordings/index.json');
+    return;
+  }
+  for (const name of list) {
+    const rec = await (await fetch('recordings/' + name, { cache: 'no-store' })).json();
+    const w = await reload();
+    for (const r of replay(w, rec)) {
+      if (!r.frames) { row(`${name} · ${r.step.id}`, 'skip', 'no frames'); continue; }
+      const bad = Object.entries(r.step.expect).filter(([k, v]) => r.got[k] !== v);
+      check(`${name} · ${r.step.id}`, bad.length === 0,
+        Object.entries(r.step.expect).map(([k, v]) => `${k} ${r.got[k]}/${v}`).join(', '));
+    }
+  }
+}
+
+async function run(only) {
+  document.getElementById('run').disabled = true;
+  out.innerHTML = '';
+  table = document.createElement('table');
+  table.innerHTML = '<tr><th style="width:56px">Result</th><th style="width:44%">Check</th><th>Detail</th></tr>';
+  out.append(table);
+  pass = fail = skip = 0;
+  document.getElementById('summary').textContent = 'running…';
+  await new Promise(r => (frame.onload = r, frame.contentWindow.location.reload()));
+  await new Promise(r => setTimeout(r, 200));
+  try {
+    if (!only) {
+      await suiteProjection();
+      await suiteSyntheticPose();
+      await suiteRoute();
+      await suiteFollower();
+      await suiteBoot();
+      await suiteRecorder();
+    }
+    await suiteRecordings();
+  } catch (e) {
+    row('suite crashed', 'fail', e && e.stack ? e.stack.split('\n')[0] : String(e));
+  }
+  document.getElementById('summary').innerHTML =
+    `<span class="${fail ? 'fail' : 'pass'}">${pass} passed, ${fail} failed</span>` +
+    (skip ? `<span class="skip">, ${skip} skipped</span>` : '');
+  document.getElementById('run').disabled = false;
+}
+
+document.getElementById('run').onclick = () => run(false);
+document.getElementById('rerun-rec').onclick = () => run(true);
+run(false);
+</script>

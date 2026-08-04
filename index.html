@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<script src="./i18n.js"></script>
 <title>Pose Runner</title>
 <!-- Optional accounts (playkit). Empty = no accounts, no network calls at all.
      Set this to your playkit URL to enable cloud best scores and leaderboards.
@@ -290,8 +291,8 @@
 
 <div id="cam-panel">
   <canvas id="cam" width="240" height="180"></canvas>
-  <div id="cam-status">Starting camera…</div>
-  <button id="recal">Recalibrate (C)</button>
+  <div id="cam-status" data-i18n>Starting camera…</div>
+  <button id="recal" data-i18n>Recalibrate (C)</button>
 </div>
 
 <button id="pause" title="Pause">
@@ -490,7 +491,7 @@ function showToast(text) {
   toastEl.classList.add('show');
 }
 let best = +(localStorage.getItem('poseRunnerBest') || 0);
-bestEl.textContent = best ? `BEST ${best}` : '';
+bestEl.textContent = best ? `${T('BEST')} ${best}` : '';
 
 function resetGame() {
   g.dist = 0; g.speed = 14; g.score = 0;
@@ -609,20 +610,20 @@ function crash() {
   syncMusic();
   sfx.crash();
   if (g.score > best) { best = g.score; localStorage.setItem('poseRunnerBest', best); }
-  bestEl.textContent = `BEST ${best}`;
+  bestEl.textContent = `${T('BEST')} ${best}`;
   summaryT = 0;
   hud.classList.add('dim');
   showOverlay(`
-    <div class="sum-title">RUN COMPLETE</div>
+    <div class="sum-title">${T('RUN COMPLETE')}</div>
     <div class="sum-score">${g.score}</div>
     <div class="sum-stats">
-      <div><b>${Math.floor(g.dist)}</b><span>DISTANCE</span></div>
-      <div><b class="sum-coin">${g.coins}${g.coinPoints ? ` <i>+${g.coinPoints}</i>` : ''}</b><span>COINS</span></div>
-      <div><b>${best}</b><span>BEST</span></div>
+      <div><b>${Math.floor(g.dist)}</b><span>${T('DISTANCE')}</span></div>
+      <div><b class="sum-coin">${g.coins}${g.coinPoints ? ` <i>+${g.coinPoints}</i>` : ''}</b><span>${T('COINS')}</span></div>
+      <div><b>${best}</b><span>${T('BEST')}</span></div>
     </div>
-    ${g.score >= best && g.score > 0 ? '<div class="sum-new">NEW BEST</div>' : ''}
-    <button class="btn" id="btn-again" disabled>Run again</button>
-    <div class="sub" id="sum-hint">${mode === 'pose' ? 'or jump in place' : 'or press Space'}</div>
+    ${g.score >= best && g.score > 0 ? `<div class="sum-new">${T('NEW BEST')}</div>` : ''}
+    <button class="btn" id="btn-again" disabled>${T('Run again')}</button>
+    <div class="sub" id="sum-hint">${T(mode === 'pose' ? 'or jump in place' : 'or press Space')}</div>
     <div id="lb-slot"></div>
   `, true);
   // The button is enabled from renderSummary off the same clock restartRun()
@@ -1255,7 +1256,7 @@ function update(dt) {
   if (g.boostCooldown > 0) g.boostCooldown = Math.max(0, g.boostCooldown - dt);
   if (g.boost > 0) {
     g.boost = Math.max(0, g.boost - dt);
-    boostEl.textContent = g.boost > 0 ? `HIGH JUMP ${g.boost.toFixed(1)}s` : '';
+    boostEl.textContent = g.boost > 0 ? `${T('HIGH JUMP')} ${g.boost.toFixed(1)}s` : '';
   }
 
   const tier = Math.floor((g.speed - 14) / 6);
@@ -1354,8 +1355,8 @@ function update(dt) {
       sfx.coin();
     } else {
       g.boost = BOOST_SECONDS;
-      boostEl.textContent = `HIGH JUMP ${g.boost.toFixed(1)}s`;
-      showToast('HIGH JUMP');
+      boostEl.textContent = `${T('HIGH JUMP')} ${g.boost.toFixed(1)}s`;
+      showToast(T('HIGH JUMP'));
       sfx.power();
     }
   }
@@ -2382,6 +2383,7 @@ window.addEventListener('keydown', e => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(k)) e.preventDefault();
   if (k === 'm' || k === 'M') { setMuted(!audioMuted); return; }
   if (phase === 'menu') return;
+  if (capture && k === 'Escape') { capture = null; startCalibration(); return; }
   if (k === 'p' || k === 'P' || k === 'Escape') {
     if (phase === 'playing') pauseGame('manual');
     else if (phase === 'paused') resumeGame();
@@ -2404,6 +2406,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'ArrowLeft' || k === 'a') setLane(g.lane - 1);
   else if (k === 'ArrowRight' || k === 'd') setLane(g.lane + 1);
   else if (k === 'c' && mode === 'pose') startCalibration();
+  else if ((k === 'r' || k === 'R') && mode === 'pose' && landmarker) startCapture();
 });
 
 // ---------- Touch ----------
@@ -2476,12 +2479,11 @@ function setPhase(p) {
   pauseBtn.classList.toggle('paused', p === 'paused');
   if (p === 'playing') hideOverlay();
   if (p === 'ready') showOverlay(`
-    <div class="big-msg">${mode === 'pose' ? 'Jump in place to start!'
-      : TOUCH ? 'Tap to start' : 'Press any arrow key to start'}</div>
+    <div class="big-msg">${T(mode === 'pose' ? 'Jump in place to start!' : TOUCH ? 'Tap to start' : 'Press any arrow key to start')}</div>
     <div class="sub" style="margin-top:14px">${mode === 'pose'
-      ? 'Step left / right to switch lanes · Jump in place · Crouch to slide<br>Press C anytime to recalibrate'
-      : TOUCH ? 'Swipe ← → to switch lanes · swipe ↑ or tap to jump · swipe ↓ to slide'
-      : '← → switch lanes · ↑ jump · ↓ slide'}</div>
+      ? T('Step left / right to switch lanes · Jump in place · Crouch to slide<br>Press C anytime to recalibrate')
+      : TOUCH ? T('Swipe ← → to switch lanes · swipe ↑ or tap to jump · swipe ↓ to slide')
+      : T('← → switch lanes · ↑ jump · ↓ slide')}</div>
   `);
 }
 
@@ -2497,12 +2499,12 @@ function pauseGame(reason, title) {
   syncMusic();
   pauseBtn.classList.add('paused');
   showOverlay(`
-    <div class="big-msg">${title || 'PAUSED'}</div>
+    <div class="big-msg">${title || T('PAUSED')}</div>
     <div class="sub">${mode === 'pose'
       ? 'Jump in place to resume — or press P / Esc'
       : TOUCH ? 'Tap anywhere to resume'
       : 'Press P, Esc, or Space to resume'}</div>
-    <button class="btn" id="btn-resume">Resume</button>
+    <button class="btn" id="btn-resume" data-i18n>Resume</button>
   `);
   document.getElementById('btn-resume').onclick = resumeGame;
 }
@@ -2520,10 +2522,10 @@ function showMenu() {
   syncMusic();
   showOverlay(`
     <h1>POSE RUNNER</h1>
-    <div class="sub">A runner you play with your body.<br>
-    Stand 1–2 m from your camera: step sideways to switch lanes,<br>jump in place, crouch to slide.<br>
-    Everything runs locally in your browser — no video ever leaves your device.</div>
-    <button class="btn" id="btn-pose">Camera Mode</button>
+    <div class="sub"><span data-i18n>A runner you play with your body.</span><br>
+    <span data-i18n>Stand 1–2 m from your camera: step sideways to switch lanes,</span><br><span data-i18n>jump in place, crouch to slide.</span><br>
+    <span data-i18n>Everything runs locally in your browser — no video ever leaves your device.</span></div>
+    <button class="btn" id="btn-pose" data-i18n>Camera Mode</button>
     <button class="btn ghost" id="btn-keys">${TOUCH ? 'Touch Mode' : 'Keyboard Mode'}</button>
     <div id="mode-guide"></div>
   `);
@@ -2533,12 +2535,12 @@ function showMenu() {
       <div class="guide-row"><span class="key">↑</span><span><b>Jump in place.</b> Do a small real hop — the jump triggers the moment your hips rise above your calibrated height.</span></div>
       <div class="guide-row"><span class="key">↓</span><span><b>Crouch.</b> Bend your knees and drop your hips to slide; stay low to keep sliding, stand up to run again.</span></div>`,
     keys: TOUCH ? `
-      <div class="guide-row"><span class="key">← →</span><span>Swipe sideways to switch lanes</span></div>
-      <div class="guide-row"><span class="key">↑</span><span>Swipe up, or tap anywhere, to jump</span></div>
-      <div class="guide-row"><span class="key">↓</span><span>Swipe down to slide</span></div>` : `
-      <div class="guide-row"><span class="key">← →</span><span>Switch lanes</span></div>
-      <div class="guide-row"><span class="key">↑</span><span>Jump</span></div>
-      <div class="guide-row"><span class="key">↓</span><span>Slide</span></div>`,
+      <div class="guide-row"><span class="key">← →</span><span data-i18n>Swipe sideways to switch lanes</span></div>
+      <div class="guide-row"><span class="key">↑</span><span data-i18n>Swipe up, or tap anywhere, to jump</span></div>
+      <div class="guide-row"><span class="key">↓</span><span data-i18n>Swipe down to slide</span></div>` : `
+      <div class="guide-row"><span class="key">← →</span><span data-i18n>Switch lanes</span></div>
+      <div class="guide-row"><span class="key">↑</span><span data-i18n>Jump</span></div>
+      <div class="guide-row"><span class="key">↓</span><span data-i18n>Slide</span></div>`,
   };
   const guideEl = document.getElementById('mode-guide');
   const setGuide = m => { guideEl.innerHTML = guides[m]; };
@@ -2594,7 +2596,7 @@ let framingOk = false, framingHint = '';
 // Takes raw frame coordinates, not the normalised ones the detector uses —
 // framing is a question about where you are in the picture.
 function checkFraming(cxNow, shY, hipY, swNow) {
-  if (swNow < SW_MIN) return { ok: false, hint: 'Come closer' };
+  if (swNow < SW_MIN) return { ok: false, hint: T('Come closer') };
   if (swNow > SW_MAX) return { ok: false, hint: 'Step back' };
   // the preview is a mirror, so left and right are the player's own
   if (cxNow < FRAME_BOX.x0 + 0.05) return { ok: false, hint: 'Move right, into the box' };
@@ -2630,7 +2632,7 @@ async function startPoseMode() {
   mode = 'pose';
   camPanel.style.display = 'block';
   phase = 'loading';
-  showOverlay(`<div class="big-msg">Loading pose model…</div><div class="sub">First load takes ~5–10 s</div>`);
+  showOverlay(`<div class="big-msg">${T('Loading pose model…')}</div><div class="sub">${T('First load takes ~5–10 s')}</div>`);
   try {
     const visionMod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm');
     const { FilesetResolver, PoseLandmarker } = visionMod;
@@ -2663,11 +2665,11 @@ async function startPoseMode() {
   } catch (err) {
     console.error(err);
     showOverlay(`
-      <div class="big-msg">Camera unavailable</div>
+      <div class="big-msg">${T('Camera unavailable')}</div>
       <div class="sub">${err.name === 'NotAllowedError'
-        ? 'Camera permission was denied. Allow it and refresh, or play with the keyboard.'
-        : 'Could not load the model or camera (the model loads from a CDN — check your connection). You can still play with the keyboard.'}</div>
-      <button class="btn ghost" id="btn-fallback">Use Keyboard Mode</button>`);
+        ? T('Camera permission was denied. Allow it and refresh, or play with the keyboard.')
+        : T('Could not load the model or camera (the model loads from a CDN — check your connection). You can still play with the keyboard.')}</div>
+      <button class="btn ghost" id="btn-fallback" data-i18n>Use Keyboard Mode</button>`);
     document.getElementById('btn-fallback').onclick = () => { mode = 'keys'; camPanel.style.display = 'none'; setPhase('ready'); };
   }
 }
@@ -2678,14 +2680,122 @@ function startCalibration() {
   calSW = 0; calTL = 0;
   jumpArmed = true; laneArmed = true; laneStillSince = 0; laneHold = 0;
   phase = 'calibrating';
-  showOverlay(`<div class="big-msg">Line yourself up</div><div class="sub">Step into the box in the camera preview, top left, and stand upright.<br>The box turns green when your framing is good — hold it for 2 seconds.<br>Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.</div>`);
+  showOverlay(`<div class="big-msg">${T('Line yourself up')}</div><div class="sub">${T('Step into the box in the camera preview, top left, and stand upright.')}<br>${T('The box turns green when your framing is good — hold it for 2 seconds.')}<br>${T('Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.')}<br><span style="opacity:.6">Press R to record a capture for the test suite.</span></div>`);
+}
+
+// ============================================================
+//   Capture — recording a real landmark stream for the tests
+// ============================================================
+// Every threshold in this file was tuned against a synthetic skeleton, and
+// reality beat that model twice: the run-in-place bob and the torso rotation
+// that reads as a crouch both only appeared once the fake human got closer to
+// a real one. A synthetic model can only contain the errors I already thought
+// of. So: record a real session once, and replay it forever.
+//
+// What is stored is four landmarks per frame — the shoulders and hips, the
+// only ones the detector reads — as numbers. No image, no video, nothing that
+// could be turned back into a picture of anybody. A minute of it is ~60 KB,
+// small enough to live in the repo as a fixture.
+//
+// The prompts are the point. A stream with no labels tells you what the
+// detector did but not what it should have done; a stream cut into segments
+// with an expected count per segment is a test.
+const CAPTURE_SCRIPT = [
+  { id: 'calibrate', prompt: 'Stand upright, arms relaxed, and hold still',
+    secs: 5, expect: null },
+  { id: 'still', prompt: 'Keep standing. Do nothing at all',
+    secs: 6, expect: { jumps: 0, crouches: 0, laneChanges: 0 } },
+  { id: 'jog', prompt: 'Jog on the spot, knees low',
+    secs: 6, expect: { jumps: 0, crouches: 0, laneChanges: 0 } },
+  // Turning, specifically, and NOT translating: a real sideways shift of 30 cm
+  // is a lane change and should be read as one. The whole point of this
+  // segment is that rotating the shoulders -- which foreshortens them, and
+  // shoulder width is the denominator of every signal -- must fire nothing.
+  { id: 'sway', prompt: 'Turn your shoulders left and right. Feet planted, hips still — turn, do not lean',
+    secs: 8, expect: { jumps: 0, crouches: 0, laneChanges: 0 } },
+  { id: 'jump3', prompt: 'Jump in place. THREE times, with a pause between',
+    secs: 10, expect: { jumps: 3, crouches: 0 } },
+  { id: 'crouch3', prompt: 'Crouch down and stand back up. THREE times, holding each for about a second',
+    secs: 12, expect: { crouches: 3, jumps: 0 } },
+  { id: 'left3', prompt: 'Step LEFT, then back to the middle. THREE times',
+    secs: 13, expect: { laneChanges: 6, jumps: 0 } },
+  { id: 'right3', prompt: 'Step RIGHT, then back to the middle. THREE times',
+    secs: 13, expect: { laneChanges: 6, jumps: 0 } },
+];
+
+let capture = null;
+
+// One clock, the same one the frames are stamped with. Two clocks is how the
+// game-over button once went live while its animation was still frozen.
+function startCapture(now = performance.now(), download = true) {
+  capture = { i: 0, t0: now, stepT0: now, frames: [], steps: [], download };
+  drawCapturePrompt(now);
+}
+
+function drawCapturePrompt(now) {
+  const st = CAPTURE_SCRIPT[capture.i];
+  const left = Math.max(0, st.secs - (now - capture.stepT0) / 1000);
+  showOverlay(`
+    <div class="sub" style="margin:0 0 10px">CAPTURE ${capture.i + 1} / ${CAPTURE_SCRIPT.length}</div>
+    <div class="big-msg">${st.prompt}</div>
+    <div class="over-score">${left.toFixed(1)}</div>
+    <div class="sub">Press Escape to abandon</div>`);
+}
+
+function captureFrame(result, now) {
+  const st = CAPTURE_SCRIPT[capture.i];
+  const lm = result && result.landmarks && result.landmarks[0];
+  if (lm) {
+    const p = [];
+    for (const i of [11, 12, 23, 24]) {
+      const q = lm[i] || { x: 0, y: 0, visibility: 0 };
+      p.push(+q.x.toFixed(4), +q.y.toFixed(4), +(q.visibility ?? 1).toFixed(2));
+    }
+    capture.frames.push({ t: Math.round(now - capture.t0), s: st.id, p });
+  }
+  if (now - capture.stepT0 < st.secs * 1000) { drawCapturePrompt(now); return; }
+
+  capture.steps.push({ id: st.id, prompt: st.prompt, expect: st.expect });
+  capture.i++;
+  capture.stepT0 = now;
+  if (capture.i < CAPTURE_SCRIPT.length) { drawCapturePrompt(now); return; }
+  return finishCapture();
+}
+
+function finishCapture() {
+  const data = {
+    version: 1,
+    // The recorder's own frame size, so a replay can reproduce the aspect
+    // correction rather than assuming 4:3.
+    frameW: video ? video.videoWidth : 640,
+    frameH: video ? video.videoHeight : 480,
+    steps: capture.steps,
+    frames: capture.frames,
+  };
+  const n = capture.frames.length;
+  if (capture.download) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+    a.download = 'pose-capture.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+  capture = null;
+  showOverlay(`<div class="big-msg">Captured ${n} frames</div>
+    <div class="sub">Saved as pose-capture.json — drop it into tests/recordings/ and reload the test page.</div>
+    <button class="btn" id="btn-cap-done">Back</button>`);
+  document.getElementById('btn-cap-done').onclick = () => startCalibration();
+  return data;
 }
 
 function poseLoop(now) {
   if (video && video.readyState >= 2 && landmarker) {
     let result = null;
     try { result = landmarker.detectForVideo(video, now); } catch (e) { /* skip a frame on timestamp hiccups */ }
-    handlePose(result, now);
+    // Capture records and nothing else — if handlePose ran, a recorded jump
+    // would start the game underneath the prompts.
+    if (capture) captureFrame(result, now);
+    else handlePose(result, now);
     drawCam(result);
   }
   requestAnimationFrame(poseLoop);
@@ -2702,7 +2812,7 @@ function handlePose(result, now) {
     const lostFor = now - lastSeenAt;
     const wentWhileDucking = lastDuckAt > 0 && lastSeenAt - lastDuckAt < 400;
     if (lostFor > 1200) g.poseDuck = false;   // never slide forever on a lost pose
-    if (now - lastSeenAt > 800) camStatus.textContent = "Can't see you — step back, upper body in frame";
+    if (now - lastSeenAt > 800) camStatus.textContent = T("Can't see you — step back, upper body in frame");
     // nobody in frame is nobody at the keyboard either: hold the run
     if (lostFor > (wentWhileDucking ? 7000 : 2000)) pauseGame('pose', 'Where did you go?');
     return;
@@ -2713,7 +2823,7 @@ function handlePose(result, now) {
   // left anyone in a long skirt or dress with a game that simply did nothing.
   const shVis = Math.min(ls.visibility ?? 1, rs.visibility ?? 1);
   const hipVis = Math.min(lh.visibility ?? 1, rh.visibility ?? 1);
-  if (shVis < 0.5) { camStatus.textContent = 'Keep your upper body in frame'; return; }
+  if (shVis < 0.5) { camStatus.textContent = T('Keep your upper body in frame'); return; }
   hipsUsable = hipVis >= 0.6;
   // Coming back from a dropout, the previous sample is stale: differentiating
   // against it manufactures an enormous velocity and fires a jump the instant
@@ -2812,7 +2922,7 @@ function handlePose(result, now) {
       return;
     }
     calSamples.push({ cx, hipY: hipN, shoulderY: shoulderN, torso: sw, swRaw, tlRaw });
-    camStatus.textContent = `Hold still… ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
+    camStatus.textContent = `${T('Hold still…')} ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
     if (calSamples.length >= 50) {
       baseCX = avg(calSamples.map(s => s.cx));
       baseHipY = avg(calSamples.map(s => s.hipY));
@@ -2826,7 +2936,7 @@ function handlePose(result, now) {
       postureStillSince = 0; duckSince = 0; duckPending = 0;
       lastPoseAt = now; jumpArmed = true; lastDuckAt = 0;
       setPhase('ready');
-      camStatus.textContent = 'Calibrated';
+      camStatus.textContent = T('Calibrated');
     }
     return;
   }
@@ -2970,7 +3080,7 @@ function handlePose(result, now) {
   }
 
   if (phase === 'playing') {
-    camStatus.textContent = g.poseDuck ? 'Slide' : (!g.grounded ? 'Jump!' : ['Left lane', 'Center lane', 'Right lane'][g.lane]);
+    camStatus.textContent = g.poseDuck ? T('Slide') : (!g.grounded ? T('Jump!') : [T('Left lane'), T('Center lane'), T('Right lane')][g.lane]);
   }
 }
 
@@ -3078,6 +3188,14 @@ window.__dbg = {
   // pose internals, so the detector can be driven with synthetic landmarks
   handlePose, startCalibration, poseTh, drawCam,
   setVideo: v => { video = v; },
+  // What the projection currently resolves to, so the tests can assert the
+  // camera height rather than eyeballing a screenshot.
+  layout: () => ({ W, H, unit: UNIT(), horizonY: horizonY(), baseY: baseY(),
+                   camElev: (baseY() - horizonY()) / UNIT() }),
+  laneDemand, planLine,
+  // Drive the recorder off a synthetic clock so the whole script can be
+  // exercised in milliseconds instead of the 73 seconds it takes a human.
+  startCapture, captureFrame, captureScript: () => CAPTURE_SCRIPT,
   poseBase: () => ({ baseHipY, baseShY, baseCX, baseTorso, calibrated, jumpArmed, hipsUsable }),
   poseSignals: () => ({
     sHipY, sShY, sTorso, hipsUsable, jumpArmed,

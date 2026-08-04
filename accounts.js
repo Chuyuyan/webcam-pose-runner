@@ -11,6 +11,7 @@
  */
 import { createPlaykit, mountGoogleButton } from './playkit.js';
 
+const T = window.T || ((s) => s);
 const GAME_ID = 'webcam-pose-runner';
 const BOARD = 'distance';
 const LOCAL_BEST_KEY = 'poseRunnerBest';
@@ -52,7 +53,7 @@ function renderBar() {
 
   if (currentUser) {
     bar.appendChild(el('span', 'acct-who', currentUser.displayName));
-    const out = el('button', 'acct-link', 'Sign out');
+    const out = el('button', 'acct-link', T('Sign out'));
     out.onclick = async () => {
       await pk.logout();
       currentUser = null;
@@ -62,7 +63,7 @@ function renderBar() {
     return;
   }
 
-  const open = el('button', 'acct-link', 'Sign in');
+  const open = el('button', 'acct-link', T('Sign in'));
   open.onclick = () => openDialog();
   bar.appendChild(open);
 }
@@ -94,7 +95,7 @@ function openDialog() {
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
 
-  const title = el('h2', 'acct-title', 'Save your best run');
+  const title = el('h2', 'acct-title', T('Save your best run'));
   const sub = el('p', 'acct-sub',
     'An account keeps your best score and puts you on the board. Entirely optional.');
   const googleSlot = el('div', 'acct-google');
@@ -104,28 +105,28 @@ function openDialog() {
 
   const form = el('form', 'acct-form');
   const email = el('input', 'acct-input');
-  email.type = 'email'; email.placeholder = 'Email'; email.required = true; email.autocomplete = 'email';
+  email.type = 'email'; email.placeholder = T('Email'); email.required = true; email.autocomplete = 'email';
   const pw = el('input', 'acct-input');
-  pw.type = 'password'; pw.placeholder = 'Password'; pw.required = true;
+  pw.type = 'password'; pw.placeholder = T('Password'); pw.required = true;
   const err = el('p', 'acct-error');
   const notice = el('p', 'acct-notice');
-  const primary = el('button', 'acct-primary', 'Create account');
+  const primary = el('button', 'acct-primary', T('Create account'));
   primary.type = 'submit';
   form.append(email, pw, err, notice, primary);
 
   const forgotRow = el('p', 'acct-switch');
-  const forgotLink = el('button', 'acct-link', 'Forgot your password?');
+  const forgotLink = el('button', 'acct-link', T('Forgot your password?'));
   forgotLink.type = 'button';
   forgotRow.appendChild(forgotLink);
   forgotRow.style.display = 'none';
 
   const switchRow = el('p', 'acct-switch');
-  const switchText = el('span', null, 'Already have an account? ');
+  const switchText = el('span', null, T('Already have an account? '));
   const switchLink = el('button', 'acct-link', 'Sign in');
   switchLink.type = 'button';
   switchRow.append(switchText, switchLink);
 
-  const skip = el('button', 'acct-skip', 'Play without an account');
+  const skip = el('button', 'acct-skip', T('Play without an account'));
   skip.type = 'button';
 
   const close = () => { rememberDismissed(); backdrop.remove(); renderBar(); };
@@ -135,7 +136,7 @@ function openDialog() {
     notice.textContent = '';
     primary.disabled = false;
     const forgot = mode === 'forgot';
-    title.textContent = forgot ? 'Reset your password' : 'Save your best run';
+    title.textContent = T(forgot ? 'Reset your password' : 'Save your best run');
     sub.textContent = forgot
       ? "Enter the email you signed up with and we'll send a link to set a new password."
       : 'An account keeps your best score and puts you on the board. Entirely optional.';
@@ -144,12 +145,12 @@ function openDialog() {
     pw.autocomplete = mode === 'register' ? 'new-password' : 'current-password';
     googleSlot.style.display = forgot ? 'none' : '';
     orRow.style.display = forgot || !googleSlot.hasChildNodes() ? 'none' : '';
-    primary.textContent = forgot ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Sign in';
+    primary.textContent = T(forgot ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Sign in');
     forgotRow.style.display = mode === 'login' ? '' : 'none';
     switchText.textContent =
-      mode === 'register' ? 'Already have an account? ' : mode === 'login' ? 'New here? ' : '';
+      mode === 'register' ? T('Already have an account? ') : mode === 'login' ? T('New here? ') : '';
     switchLink.textContent =
-      mode === 'register' ? 'Sign in' : mode === 'forgot' ? 'Back to sign in' : 'Create one';
+      T(mode === 'register' ? 'Sign in' : mode === 'forgot' ? 'Back to sign in' : 'Create one');
     email.focus();
   }
 
@@ -170,7 +171,7 @@ function openDialog() {
         await pk.requestPasswordReset(email.value);
         // Same wording whichever it is — the server does not say whether the
         // address exists, and neither should this.
-        notice.textContent = 'If that address has an account, a reset link is on its way.';
+        notice.textContent = T('If that address has an account, a reset link is on its way.');
         return;
       }
       currentUser =
@@ -182,7 +183,7 @@ function openDialog() {
       renderBar();
       await syncBest();
     } catch (e2) {
-      err.textContent = e2?.message || 'Something went wrong. Try again.';
+      err.textContent = e2?.message || T('Something went wrong. Try again.');
       primary.disabled = false;
     }
   };
@@ -203,7 +204,7 @@ function openDialog() {
         renderBar();
         await syncBest();
       },
-      onError: () => { err.textContent = 'Google sign-in failed. Try email instead.'; },
+      onError: () => { err.textContent = T('Google sign-in failed. Try email instead.'); },
       width: 260,
     }).then(() => render());
   }
@@ -270,7 +271,7 @@ export function leaderboardHtml(entries) {
         )}</span></div>`,
     )
     .join('');
-  return `<div class="lb"><div class="lb-title">Longest runs</div>${rows}</div>`;
+  return `<div class="lb"><div class="lb-title">${T('Longest runs')}</div>${rows}</div>`;
 }
 
 function escapeHtml(s) {
