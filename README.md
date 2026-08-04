@@ -68,7 +68,7 @@ Note: `getUserMedia` requires HTTPS or localhost, so deploy behind HTTPS.
 | Yellow gate | Crouch and slide under |
 | Train | Switch lanes around it |
 
-Coins are worth 5 points each and sometimes arc overhead, so the run pays for jumping through it rather than around it. The winged boot grants 7 seconds of **high jump**, which peaks at 3.3 units — above the 2.7 roof of a train, so while it lasts you can **land on top of a train and ride it** until it runs out from under you. Its cooldown is measured in seconds rather than distance: a distance gate keeps shrinking in real terms as the run speeds up, which is why the pickup kept creeping back to feeling constant however far the gate was pushed out.
+Coins are worth **10 points**, and a coin taken within 22 units of the last one continues a **streak** worth 20% more each time, up to triple. One missed coin or one hit resets it. Flat points made a coin cost more distance than it returned, so the sane play was to ignore every arc and run the middle lane; the streak is what makes an overhead arc worth jumping *through* rather than around. The gap is measured in distance rather than seconds because the run keeps accelerating, and a time window would quietly widen into "any two coins in the same postcode" by the end of a long one. The winged boot grants 7 seconds of **high jump**, which peaks at 3.3 units — above the 2.7 roof of a train, so while it lasts you can **land on top of a train and ride it** until it runs out from under you. Its cooldown is measured in seconds rather than distance: a distance gate keeps shrinking in real terms as the run speeds up, which is why the pickup kept creeping back to feeling constant however far the gate was pushed out.
 
 Coins are kept out of solid obstacles from both directions. A lane is only used if nothing solid already overlaps that stretch, and because a coin run is up to twelve units long and a train generated afterwards can still land on top of one, buried pickups are swept out again every time new obstacles appear.
 
@@ -89,6 +89,12 @@ Each run picks the next of three — **Neon City**, **Summer Shore**, **Midwinte
 Summer Shore is open water: no buildings anywhere, the far layer is rounded islands rather than a skyline, and the verges carry palms, buoys bobbing in their own ripples, and rocks. The train there is a **shark** — same footprint and the same lethal height, so nothing about the collision rules or riding on top changes, only what is coming at you. Midwinter has falling snow, snow-loaded conifers and snow on every roof.
 
 The shark reuses the trains' box geometry rather than a tapered body of its own. Two attempts at a rounded one read as a stack of discs close up and a grey slab far away, and the box is already proven to close cleanly from every angle — so the identity lives entirely in the face on the front: snout, a mouth of teeth across the middle, and eyes. The first version put the jaw down at the waterline, which is exactly where the player stands, hiding the one feature that identifies it.
+
+## Fitting the screen
+
+The camera's height above the road is not a free parameter: it is the gap between the horizon and your feet, measured in world units. Pinning the horizon to a fraction of the window height while scaling world units by the window width lets that ratio drift with the window shape — the same code put the camera 2.6 units up on a 16:9 laptop and **10.2 units up on a phone held upright**, which is why the game looked like a near-overhead map on a phone and like a runner everywhere else.
+
+So the camera height is set directly and the pixel scale is derived from it. It cannot be held perfectly constant: at a fixed height a tall screen shows a thin band of road under an enormous sky, so the camera lifts part of the way (to 4.4 units on a phone) and the horizon drops to meet it (40% → 60% of the height). The road ends up about 1.2× the width of a phone screen, which crops the far kerb beside your feet — a much better trade than being able to see three metres ahead. A 16:9 window is unchanged; 16:10 windows get very slightly lower, which is the same drift being corrected.
 
 ## The world
 

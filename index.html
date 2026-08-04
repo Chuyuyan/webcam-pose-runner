@@ -96,6 +96,22 @@
   .sum-stats div { display: flex; flex-direction: column; gap: 3px; }
   .sum-stats b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .sum-stats span { font-size: 10px; letter-spacing: 2px; color: #8fa6bd; }
+  .sum-coin i { font-style: normal; font-size: 15px; color: var(--yellow); }
+
+  /* the points a coin is worth, floating up out of the coin counter */
+  #coin-pop {
+    position: fixed; top: 96px; right: 20px; z-index: 15; pointer-events: none;
+    font-size: 17px; font-weight: 800; color: var(--yellow); opacity: 0;
+    text-shadow: 0 2px 8px rgba(0,0,0,.7); font-variant-numeric: tabular-nums;
+  }
+  #coin-pop small { font-size: 11px; opacity: .85; margin-left: 3px; }
+  #coin-pop.show { animation: coinPop .62s ease-out; }
+  @keyframes coinPop {
+    0%   { opacity: 0; transform: translateY(4px); }
+    18%  { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: translateY(-16px); }
+  }
+  @media (max-width: 560px) { #coin-pop { top: 122px; right: 12px; font-size: 15px; } }
   .sum-new {
     font-size: 12px; font-weight: 800; letter-spacing: 3px; color: var(--yellow);
     margin-bottom: 10px; animation: toastFade 1.6s ease-out infinite;
@@ -288,6 +304,8 @@
   <svg class="off" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm18.5-.9l-1.4-1.4L17 9.8l-3.1-3.1v2.8l1.7 1.7L14 12.8v2.8l3.1-3.1 3.1 3.1 1.4-1.4-3.1-3.1 3-3z"/></svg>
 </button>
 
+<div id="coin-pop"></div>
+
 <div id="account-bar"></div>
 
 <div id="overlay">
@@ -322,6 +340,7 @@ const scoreEl = document.getElementById('score');
 const bestEl = document.getElementById('best');
 const heartsEl = document.getElementById('hearts');
 const toastEl = document.getElementById('toast');
+const coinPopEl = document.getElementById('coin-pop');
 const muteBtn = document.getElementById('mute');
 const coinEl = document.getElementById('coin-n');
 const boostEl = document.getElementById('boost');
@@ -348,10 +367,31 @@ const SPAWN_Z = 70;
 // dropped once they reach it (the camera sits at z = -NEAR)
 const NEAR_CLIP = -5;
 const TRAIN_W = 1.9, TRAIN_H = 2.7;
-const UNIT = () => W * 0.115;                 // world unit → screen px at z=0
-const proj = z => NEAR / (NEAR + Math.max(z, -NEAR * 0.9));
-const horizonY = () => H * 0.40;
+const COIN_VALUE = 10;
+// How high the camera sits, in world units, is not a free choice: it is the
+// gap between the horizon and your feet measured in world units, i.e.
+// (baseY - horizonY) / UNIT. Pinning the horizon to a fraction of the height
+// while scaling world units by the width lets that ratio drift with the
+// window shape -- on a 16:9 laptop it came out at 2.6 units, on a phone held
+// upright at 10.2, which is why the same game looked like a near-overhead
+// map on a phone. So fix the camera height instead and derive the pixel
+// scale from it.
+//
+// It cannot be held completely constant: a taller screen at a fixed camera
+// height shows a narrow band of road and an enormous sky, so lift the camera
+// part of the way and drop the horizon to meet it. The road ends up slightly
+// wider than a phone screen, which crops the far kerb at your feet and looks
+// fine -- much better than the alternative of seeing three metres ahead.
+// A zero-height window -- a collapsed pane, a hidden iframe -- makes W / H
+// NaN, and NaN spreads from here into every coordinate on the canvas.
+const portraitness = () => (H > 0 ? clamp((1.45 - W / H) / 0.95, 0, 1) : 0);
+const CAM_ELEV = () => 2.64 + 1.80 * portraitness();
+const horizonY = () => H * (0.40 + 0.20 * portraitness());
 const baseY = () => H * 0.94;
+// world unit → screen px at z=0. Clamped against the width so an extreme
+// window cannot zoom the road to a thread or past the edges of the screen.
+const UNIT = () => clamp((baseY() - horizonY()) / CAM_ELEV(), W * 0.085, W * 0.20);
+const proj = z => NEAR / (NEAR + Math.max(z, -NEAR * 0.9));
 // Raising the camera by camY pushes everything on the ground *down* the
 // screen, by an amount that scales with proj — near things move a lot, distant
 // things barely, and the horizon not at all. That parallax is what sells the
@@ -433,6 +473,15 @@ function updateHearts() {
   }
 }
 
+// The coin counter alone never said what a coin was worth, so a player had no
+// reason to jump through an arc rather than around it.
+function popCoin(worth, streak) {
+  coinPopEl.innerHTML = `+${worth}${streak > 1 ? `<small>x${streak}</small>` : ''}`;
+  coinPopEl.classList.remove('show');
+  void coinPopEl.offsetWidth;   // restart the animation
+  coinPopEl.classList.add('show');
+}
+
 function showToast(text) {
   toastEl.textContent = text;
   toastEl.classList.remove('show');
@@ -458,6 +507,8 @@ function resetGame() {
   THEME = THEMES[themeIdx];
   g.flakes = THEME.weather === 'snow' ? makeFlakes() : null;
   g.coins = 0; g.bonus = 0; g.boost = 0;
+  g.coinPoints = 0; g.streak = 0; g.lastCoinAt = -1e9;
+  coinPopEl.classList.remove('show');
   // On your heels from the first stride — no quiet opening to settle into.
   g.t = 0; g.slow = 0;
   g.cat = { gap: CAT_START_GAP, patience: CAT_PATIENCE };
@@ -526,6 +577,7 @@ function startPlay() {
 // short grace period, so one train cannot eat the whole health bar.
 function loseHeart() {
   g.hearts--;
+  g.streak = 0;
   g.regen = 0;
   g.invuln = IFRAME_SECONDS;
   g.shake = 1;
@@ -564,7 +616,7 @@ function crash() {
     <div class="sum-score">${g.score}</div>
     <div class="sum-stats">
       <div><b>${Math.floor(g.dist)}</b><span>DISTANCE</span></div>
-      <div><b>${g.coins}</b><span>COINS</span></div>
+      <div><b class="sum-coin">${g.coins}${g.coinPoints ? ` <i>+${g.coinPoints}</i>` : ''}</b><span>COINS</span></div>
       <div><b>${best}</b><span>BEST</span></div>
     </div>
     ${g.score >= best && g.score > 0 ? '<div class="sum-new">NEW BEST</div>' : ''}
@@ -1175,8 +1227,22 @@ function update(dt) {
     if (p.h > reach) continue;
     g.pickups.splice(i, 1);
     if (p.type === 'coin') {
-      g.coins++; g.bonus += 5;
+      // A coin is only worth taking if it competes with the distance it costs
+      // you to reach it -- 10 points is roughly two seconds of running. The
+      // streak is what makes an overhead arc worth jumping through rather
+      // than steering around: take coins without a gap and each one in the
+      // chain is worth more, up to triple, and one missed coin or one hit
+      // resets it.
+      // The gap is measured in distance, not seconds: the run keeps
+      // accelerating, so a time window would quietly widen into "any two
+      // coins in the same postcode" by the end of a long run.
+      g.streak = (g.dist - g.lastCoinAt < 22) ? Math.min(g.streak + 1, 10) : 1;
+      g.lastCoinAt = g.dist;
+      const mult = 1 + (g.streak - 1) * 0.2;             // 1.0 -> 3.0
+      const worth = Math.round(COIN_VALUE * mult);
+      g.coins++; g.coinPoints += worth; g.bonus += worth;
       coinEl.textContent = g.coins;
+      popCoin(worth, g.streak);
       sfx.coin();
     } else {
       g.boost = BOOST_SECONDS;
