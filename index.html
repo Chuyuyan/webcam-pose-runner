@@ -151,6 +151,11 @@
     background: none; border: 1px solid #35507a; border-radius: 6px; padding: 3px 10px; cursor: pointer;
   }
   #recal:hover { color: #fff; border-color: var(--cyan); }
+  #rec {
+    display: block; margin: 5px auto 0; font-size: 12px; color: #9fb4c8;
+    background: none; border: 1px solid #35507a; border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  }
+  #rec:hover { color: #fff; border-color: var(--cyan); }
 
   #overlay {
     position: fixed; inset: 0; display: flex; justify-content: center;
@@ -293,6 +298,7 @@
   <canvas id="cam" width="240" height="180"></canvas>
   <div id="cam-status" data-i18n>Starting camera…</div>
   <button id="recal" data-i18n>Recalibrate (C)</button>
+  <button id="rec" data-i18n>Record test data</button>
 </div>
 
 <button id="pause" title="Pause">
@@ -2384,6 +2390,12 @@ window.addEventListener('keydown', e => {
   if (k === 'm' || k === 'M') { setMuted(!audioMuted); return; }
   if (phase === 'menu') return;
   if (capture && k === 'Escape') { capture = null; startCalibration(); return; }
+  // Recalibrate and record are camera-mode housekeeping, not moves. They have
+  // to sit above the "only while playing" gate below -- which is exactly where
+  // they were, so C never worked anywhere the guide said it did ("press C
+  // anytime"), and R could not be reached from the screen that offers it.
+  if (k === 'c' || k === 'C') { if (mode === 'pose') startCalibration(); return; }
+  if (k === 'r' || k === 'R') { if (mode === 'pose' && landmarker) startCapture(); return; }
   if (k === 'p' || k === 'P' || k === 'Escape') {
     if (phase === 'playing') pauseGame('manual');
     else if (phase === 'paused') resumeGame();
@@ -2405,8 +2417,6 @@ window.addEventListener('keydown', e => {
   else if (k === 'ArrowDown' || k === 's') doDuck();
   else if (k === 'ArrowLeft' || k === 'a') setLane(g.lane - 1);
   else if (k === 'ArrowRight' || k === 'd') setLane(g.lane + 1);
-  else if (k === 'c' && mode === 'pose') startCalibration();
-  else if ((k === 'r' || k === 'R') && mode === 'pose' && landmarker) startCapture();
 });
 
 // ---------- Touch ----------
@@ -2690,7 +2700,7 @@ function startCalibration() {
   calSW = 0; calTL = 0;
   jumpArmed = true; laneArmed = true; laneStillSince = 0; laneHold = 0;
   phase = 'calibrating';
-  showOverlay(`<div class="big-msg">${T('Line yourself up')}</div><div class="sub">${T('Step into the box in the camera preview, top left, and stand upright.')}<br>${T('The box turns green when your framing is good — hold it for 2 seconds.')}<br>${T('Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.')}<br><span style="opacity:.6">Press R to record a capture for the test suite.</span></div>`);
+  showOverlay(`<div class="big-msg">${T('Line yourself up')}</div><div class="sub">${T('Step into the box in the camera preview, top left, and stand upright.')}<br>${T('The box turns green when your framing is good — hold it for 2 seconds.')}<br>${T('Good framing is what makes the controls precise: too far away and the pose reading gets noisy, too close and your arms leave the frame.')}<br><span style="opacity:.6">${T('Press R, or the button under the preview, to record test data.')}</span></div>`);
 }
 
 // ============================================================
@@ -2738,6 +2748,9 @@ let capture = null;
 // One clock, the same one the frames are stamped with. Two clocks is how the
 // game-over button once went live while its animation was still frozen.
 function startCapture(now = performance.now(), download = true) {
+  // Stop the run first: handlePose is bypassed while recording, so a game left
+  // playing underneath would coast into the first obstacle unattended.
+  if (phase === 'playing' || phase === 'paused') { phase = 'ready'; syncMusic(); }
   capture = { i: 0, t0: now, stepT0: now, frames: [], steps: [], download };
   drawCapturePrompt(now);
 }
@@ -2746,10 +2759,10 @@ function drawCapturePrompt(now) {
   const st = CAPTURE_SCRIPT[capture.i];
   const left = Math.max(0, st.secs - (now - capture.stepT0) / 1000);
   showOverlay(`
-    <div class="sub" style="margin:0 0 10px">CAPTURE ${capture.i + 1} / ${CAPTURE_SCRIPT.length}</div>
-    <div class="big-msg">${st.prompt}</div>
+    <div class="sub" style="margin:0 0 10px">${T('RECORDING')} ${capture.i + 1} / ${CAPTURE_SCRIPT.length}</div>
+    <div class="big-msg">${T(st.prompt)}</div>
     <div class="over-score">${left.toFixed(1)}</div>
-    <div class="sub">Press Escape to abandon</div>`);
+    <div class="sub">${T('Press Escape to abandon')}</div>`);
 }
 
 function captureFrame(result, now) {
@@ -2791,9 +2804,9 @@ function finishCapture() {
     URL.revokeObjectURL(a.href);
   }
   capture = null;
-  showOverlay(`<div class="big-msg">Captured ${n} frames</div>
-    <div class="sub">Saved as pose-capture.json — drop it into tests/recordings/ and reload the test page.</div>
-    <button class="btn" id="btn-cap-done">Back</button>`);
+  showOverlay(`<div class="big-msg">${n} ${T('frames captured')}</div>
+    <div class="sub">${T('Saved as pose-capture.json. Install it with: python3 tests/add-recording.py')}</div>
+    <button class="btn" id="btn-cap-done">${T('Back')}</button>`);
   document.getElementById('btn-cap-done').onclick = () => startCalibration();
   return data;
 }
@@ -3170,6 +3183,7 @@ function drawCam(result) {
 }
 
 document.getElementById('recal').onclick = () => { if (mode === 'pose') startCalibration(); };
+document.getElementById('rec').onclick = () => { if (mode === 'pose' && landmarker) startCapture(); };
 
 // debug hooks (used by automated tests; harmless in production)
 window.__g = g;

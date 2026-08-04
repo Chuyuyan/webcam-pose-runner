@@ -187,7 +187,15 @@ Only the score is ever transmitted. Pose detection stays on-device regardless.
 
 It covers the projection (the camera must sit at the same height on a phone as on a laptop), the pose detector against a synthetic human, the coin route (every coin audited for being inside something solid, plus a bot that follows nothing but the trail and has to take fewer hits than one that ignores it), where the boot spawns, and a full round trip through the recorder below.
 
-**Recordings.** Every threshold in this repo was tuned against a synthetic skeleton, and reality beat that model twice — the run-in-place bob and the torso rotation that reads as a crouch both only showed up once the fake human got closer to a real one. A synthetic model can only contain the mistakes you already thought of. So the recorder captures a real one: in camera mode press **R**, follow the eight prompts (~73 s), and the page saves a `pose-capture.json`. Drop it in `tests/recordings/` and list it in `tests/recordings/index.json`, and the suite replays it forever.
+**Recordings.** Every threshold in this repo was tuned against a synthetic skeleton, and reality beat that model twice — the run-in-place bob and the torso rotation that reads as a crouch both only showed up once the fake human got closer to a real one. A synthetic model can only contain the mistakes you already thought of. So the recorder captures a real one:
+
+```bash
+python3 serve.py 5175                 # then open http://localhost:5175 in a normal browser
+# Camera Mode -> hold the green box -> "Record test data" under the preview
+python3 tests/add-recording.py my-name
+```
+
+Eight prompts, about 73 seconds. The page saves a `pose-capture.json` to your downloads; `add-recording.py` moves it into `tests/recordings/` and adds it to the manifest, and the suite replays it forever. The prompt wording *is* the assertion — "three times" means the replay expects exactly three — so it is translated alongside everything else rather than left in English.
 
 What is stored is four landmarks per frame — the shoulders and hips, the only ones the detector reads — as numbers. No image, no video, nothing that can be turned back into a picture of anybody. A minute is about 60 KB.
 

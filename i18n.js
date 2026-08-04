@@ -23,6 +23,27 @@
     'Pause': '暂停',
     'Mute (M)': '静音（M）',
     'Recalibrate (C)': '重新校准（C）',
+    'Record test data': '录制测试数据',
+    // capture prompts — the wording is the ground truth the tests assert
+    // against, so a mistranslation here silently breaks a recording
+    'RECORDING': '录制中',
+    'Press Escape to abandon': '按 Esc 放弃本次录制',
+    'frames captured': '帧已录制',
+    'Saved as pose-capture.json. Install it with: python3 tests/add-recording.py':
+      '已保存为 pose-capture.json。用这条命令装进测试：python3 tests/add-recording.py',
+    'Back': '返回',
+    'Press R, or the button under the preview, to record test data.':
+      '按 R，或点预览下方的按钮，可以录制测试数据。',
+    'Stand upright, arms relaxed, and hold still': '站直，手臂放松，保持不动',
+    'Keep standing. Do nothing at all': '继续站着，什么都不要做',
+    'Jog on the spot, knees low': '原地小步慢跑，膝盖不要抬高',
+    'Turn your shoulders left and right. Feet planted, hips still — turn, do not lean':
+      '左右转动肩膀。脚不要动、胯不要动——是转身，不是侧倾',
+    'Jump in place. THREE times, with a pause between': '原地跳跃，跳三次，每次之间停顿一下',
+    'Crouch down and stand back up. THREE times, holding each for about a second':
+      '蹲下再站起来，做三次，每次蹲住约一秒',
+    'Step LEFT, then back to the middle. THREE times': '向左跨一步，再回到中间。做三次',
+    'Step RIGHT, then back to the middle. THREE times': '向右跨一步，再回到中间。做三次',
     'Stand 1–2 m from your camera: step sideways to switch lanes,': '站在距摄像头 1–2 米处：左右跨步切换跑道，',
     'jump in place, crouch to slide.': '原地跳跃，下蹲滑铲。',
     'Everything runs locally in your browser — no video ever leaves your device.': '一切都在你的浏览器本地运行——视频绝不离开你的设备。',
