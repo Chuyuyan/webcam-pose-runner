@@ -782,19 +782,29 @@ function planLine(d0, n, startLane) {
   return { line, demand };
 }
 
+// The boot is the one thing in the game worth going out of your way for, so
+// it is deliberately not on the way. It sits in the lane furthest from the
+// line the coins are drawing, at a height a standing player cannot reach:
+// collection reaches 1.75 above you and a normal jump peaks at 1.50, so 3.0
+// leaves a quarter of a unit of headroom and a window of about a quarter of a
+// second to be inside. Taking it costs you the trail and your coin streak,
+// which is the trade -- sitting on the route it was just another coin.
+const BOOST_H = 3.0;
+
 function spawnPickups(d) {
-  // Nearest to where the line left off, so the boot sits on the route rather
-  // than calling you off it.
-  const lanes = [0, 1, 2].sort((a, b) => Math.abs(a - g.lineLane) - Math.abs(b - g.lineLane));
+  const lanes = [0, 1, 2].sort((a, b) => Math.abs(b - g.lineLane) - Math.abs(a - g.lineLane));
   // The cooldown is in seconds, not distance. A distance gate keeps shrinking
   // in real terms as the run speeds up — the same 1400 units is 40 seconds
   // early on and 29 at full tilt — which is why high jump kept creeping back
   // to feeling constant however far the gate was pushed out.
   if (g.boostCooldown <= 0 && Math.random() < 0.35) {
-    const lane = lanes.find(l => laneFree(l, d, d + 1));
+    // Clear well past the boot, not just at it. A one-unit check happily put
+    // it three units in front of a train's nose: you jump, take it, and land
+    // straight into the face of the thing -- a reward you cannot survive
+    // collecting is a trap. Eight units is about 0.4s to get out of the lane.
+    const lane = lanes.find(l => laneFree(l, d - 2, d + 8));
     if (lane === undefined) return 1;
-    g.pickups.push({ type: 'boost', lane, d, h: 1.0 });
-    g.lineLane = lane;
+    g.pickups.push({ type: 'boost', lane, d, h: BOOST_H });
     g.boostCooldown = BOOST_COOLDOWN;
     return 1;
   }
@@ -2083,10 +2093,14 @@ function drawPlayer(now) {
   const runPhase = g.dist * 2.2;
 
   // shadow, cast on whatever is underfoot rather than always on the road
+  // Both of these run out before the height does: the alpha goes negative
+  // above 2.7 units of air, which makes the whole colour invalid and drops
+  // the shadow, and the radius goes negative above 5.5 -- reachable off a
+  // train roof with a high jump -- which throws outright.
   const air = Math.max(0, h - g.surface);
-  ctx.fillStyle = `rgba(0,0,0,${0.4 - air * 0.15})`;
+  ctx.fillStyle = `rgba(0,0,0,${Math.max(0.04, 0.4 - air * 0.15)})`;
   ctx.beginPath();
-  ctx.ellipse(cx, gy - g.surface * unit - 3, unit * (0.55 - air * 0.1), unit * 0.11, 0, 0, 7);
+  ctx.ellipse(cx, gy - g.surface * unit - 3, unit * Math.max(0.12, 0.55 - air * 0.1), unit * 0.11, 0, 0, 7);
   ctx.fill();
 
   const bodyH = duck ? 0.62 : 1.05, bodyW = duck ? 0.98 : 0.78;
