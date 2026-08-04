@@ -363,6 +363,7 @@ const DIVIDERS = [-1.1, 1.1];
 const ROAD_EDGE = 3.6;
 const NEAR = 6;
 const SPAWN_Z = 70;
+const PICKUP_Z = 40;
 // world z of the near clip plane: obstacles sweep past the player and are
 // dropped once they reach it (the camera sits at z = -NEAR)
 const NEAR_CLIP = -5;
@@ -432,7 +433,7 @@ const g = {
   duckUntil: 0,         // keyboard slide timer
   poseDuck: false,      // camera-mode crouch (held posture)
   obstacles: [], nextSpawn: 0,
-  pickups: [], nextPickup: 0,
+  pickups: [], nextPickup: 0, lineLane: 1,
   scenery: [], nextScenery: 0,
   flakes: null,
   coins: 0, bonus: 0, boost: 0,   // boost = seconds of high-jump left
@@ -507,7 +508,7 @@ function resetGame() {
   THEME = THEMES[themeIdx];
   g.flakes = THEME.weather === 'snow' ? makeFlakes() : null;
   g.coins = 0; g.bonus = 0; g.boost = 0;
-  g.coinPoints = 0; g.streak = 0; g.lastCoinAt = -1e9;
+  g.coinPoints = 0; g.streak = 0; g.lastCoinAt = -1e9; g.lineLane = 1;
   coinPopEl.classList.remove('show');
   // On your heels from the first stride — no quiet opening to settle into.
   g.t = 0; g.slow = 0;
@@ -705,32 +706,124 @@ function pruneBuriedPickups() {
   }));
 }
 
+// ---------- The line ----------
+// Coins used to be laid down whichever lane happened to be free at the moment
+// they were generated, which meant a trail could point straight into the face
+// of a train that arrived a second later. So the trail is no longer decorative
+// -- it is the route, solved for and then drawn.
+
+const COIN_GAP = 1.7;
+
+// What a lane asks of you at a given distance. The margin keeps a coin off the
+// very lip of an obstacle, where you would be reaching for it at the same
+// moment you need to be jumping.
+function laneDemand(lane, z) {
+  for (const o of g.obstacles) {
+    if (o.lane !== lane) continue;
+    if (o.d - 1.3 > z || o.d + o.depth + 1.3 < z) continue;
+    if (o.type === 'train') return 'block';
+    if (o.type === 'hurdle') return 'jump';
+    return 'slide';
+  }
+  return 'free';
+}
+
+const BLOCKED = 1e9;
+// A hurdle or a gate costs you a jump or a slide and nothing else -- no speed,
+// no ground. A lane change costs you the width of the road at the moment you
+// are least able to react to what is in the new lane. So an action is priced
+// well below a switch, and the line hops the low stuff rather than slinking
+// around it; at 0.7 the cheapest route was almost always the next lane over,
+// and a trail that only ever teaches "dodge" is not much of a teacher.
+const ACTION_COST = 0.35;
+const SWITCH_COST = 1.3;
+const WHIPLASH_COST = 1.2;  // jump straight into a slide, or the reverse
+
+// Cheapest runnable line through the next `n` coin slots, as a lane per slot.
+// Three lanes and a dozen slots is small enough to solve exactly, so there is
+// no reason to approximate it: walk the costs forward, keep one back-pointer
+// per lane, read the winner back off the end.
+function planLine(d0, n, startLane) {
+  const demand = [];
+  for (let i = 0; i < n; i++) {
+    const z = d0 + i * COIN_GAP;
+    demand.push([0, 1, 2].map(l => laneDemand(l, z)));
+  }
+  const stepCost = k => k === 'block' ? BLOCKED : k === 'free' ? 0 : ACTION_COST;
+
+  // Starting far from where the last trail left off is not free either, or
+  // consecutive runs jump across the road with nothing joining them.
+  let cost = [0, 1, 2].map(l => stepCost(demand[0][l]) + Math.abs(l - startLane) * SWITCH_COST);
+  const back = [];
+  for (let i = 1; i < n; i++) {
+    const next = [BLOCKED, BLOCKED, BLOCKED], ptr = [0, 0, 0];
+    for (let l = 0; l < 3; l++) {
+      const here = stepCost(demand[i][l]);
+      if (here >= BLOCKED) continue;
+      // one lane per slot: at ~0.12 s a slot, two is not a step, it is a leap
+      for (let p = Math.max(0, l - 1); p <= Math.min(2, l + 1); p++) {
+        if (cost[p] >= BLOCKED) continue;
+        let c = cost[p] + here + Math.abs(l - p) * SWITCH_COST;
+        const a = demand[i][l], b = demand[i - 1][p];
+        if (a !== 'free' && b !== 'free' && a !== b) c += WHIPLASH_COST;
+        if (c < next[l]) { next[l] = c; ptr[l] = p; }
+      }
+    }
+    back.push(ptr);
+    cost = next;
+  }
+  let end = 0;
+  for (let l = 1; l < 3; l++) if (cost[l] < cost[end]) end = l;
+  if (cost[end] >= BLOCKED) return null;      // no line through: lay nothing
+
+  const line = new Array(n);
+  line[n - 1] = end;
+  for (let i = n - 2; i >= 0; i--) line[i] = back[i][line[i + 1]];
+  return { line, demand };
+}
+
 function spawnPickups(d) {
-  const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
+  // Nearest to where the line left off, so the boot sits on the route rather
+  // than calling you off it.
+  const lanes = [0, 1, 2].sort((a, b) => Math.abs(a - g.lineLane) - Math.abs(b - g.lineLane));
   // The cooldown is in seconds, not distance. A distance gate keeps shrinking
   // in real terms as the run speeds up — the same 1400 units is 40 seconds
   // early on and 29 at full tilt — which is why high jump kept creeping back
   // to feeling constant however far the gate was pushed out.
   if (g.boostCooldown <= 0 && Math.random() < 0.35) {
     const lane = lanes.find(l => laneFree(l, d, d + 1));
-    if (lane === undefined) return;
+    if (lane === undefined) return 1;
     g.pickups.push({ type: 'boost', lane, d, h: 1.0 });
+    g.lineLane = lane;
     g.boostCooldown = BOOST_COOLDOWN;
-    return;
+    return 1;
   }
-  // a run of coins, sometimes arcing up so it pays to jump through it
-  const n = Math.floor(rand(5, 9));
-  const span = (n - 1) * 1.7;
-  const lane = lanes.find(l => laneFree(l, d, d + span));
-  if (lane === undefined) return;
-  const arc = Math.random() < 0.4;
+
+  const n = Math.floor(rand(6, 11));
+  const span = (n - 1) * COIN_GAP;
+  const plan = planLine(d, n, g.lineLane);
+  if (!plan) return span;
+  const { line, demand } = plan;
+  g.lineLane = line[n - 1];
+
+  // A stretch with nothing in it is the one place a coin can ask for something
+  // the route does not already demand, so that is where the arc lives.
+  const open = demand.every((row, i) => row[line[i]] === 'free');
+  const arc = open && Math.random() < 0.45;
+
   for (let i = 0; i < n; i++) {
-    const t = n > 1 ? i / (n - 1) : 0;
-    g.pickups.push({
-      type: 'coin', lane, d: d + i * 1.7,
-      h: arc ? 0.6 + Math.sin(t * Math.PI) * 1.9 : 0.6,
-    });
+    const lane = line[i], k = demand[i][lane];
+    let h;
+    if (k === 'jump') h = 2.3;              // sits at the top of the hop
+    else if (k === 'slide') h = 0.45;       // under the bar, only reachable low
+    else if (arc) h = 0.6 + Math.sin((i / (n - 1)) * Math.PI) * 1.9;
+    // Lift the coins either side of a hurdle so the trail draws the arc you
+    // are about to fly, instead of a flat line with one coin floating over it.
+    else if (demand[i - 1]?.[lane] === 'jump' || demand[i + 1]?.[lane] === 'jump') h = 1.5;
+    else h = 0.6;
+    g.pickups.push({ type: 'coin', lane, d: d + i * COIN_GAP, h });
   }
+  return span;
 }
 
 // ---------- The chase ----------
@@ -1173,11 +1266,16 @@ function update(dt) {
   // keep obstacles until they have swept fully past the near clip plane
   g.obstacles = g.obstacles.filter(o => o.d + o.depth - g.dist > NEAR_CLIP);
 
-  // Pickups spawn after obstacles for this stretch, so laneFree() can see
-  // what is already there and never bury a coin inside a train.
-  if (g.dist + SPAWN_Z > g.nextPickup) {
-    spawnPickups(g.nextPickup + SPAWN_Z);
-    g.nextPickup += rand(13, 23);
+  // Coins are generated closer in than obstacles are, so by the time a stretch
+  // gets its trail the obstacles in it already exist and the route can be
+  // solved against them. Sharing a frontier with the obstacles meant the
+  // planner would be routing around a road that was still being built.
+  // The gap is measured from the end of the trail just laid, not from its
+  // start. A fixed step shorter than a trail let two of them overlap and
+  // interleave, which put two different lines on the road at once -- the whole
+  // point is that there is one.
+  if (g.dist + PICKUP_Z > g.nextPickup) {
+    g.nextPickup += spawnPickups(g.nextPickup + PICKUP_Z) + rand(11, 20);
   }
   g.pickups = g.pickups.filter(p => p.d - g.dist > NEAR_CLIP);
 
