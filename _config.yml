@@ -1,0 +1,10 @@
+# GitHub Pages builds this repo straight from the branch root, which means
+# anything committed here is also published. The site is the game; everything
+# listed below is workshop furniture that happens to live in the same folder.
+#
+# The test page in particular drives the game in a hidden iframe and replays
+# recorded pose data — useful to a contributor, noise to a visitor, and one
+# more thing for a stranger to stumble into from a URL.
+exclude:
+  - tests
+  - serve.py

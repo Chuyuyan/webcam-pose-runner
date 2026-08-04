@@ -2582,8 +2582,11 @@ let lastJumpAt = 0, lastSeenAt = 0;
 let sHipY = 0, sShY = 0, sCx = 0, sTorso = 0.25, poseSmoothed = false;
 let prevVY = 0, lastPoseAt = 0, lastDuckAt = 0, jumpArmed = true;
 let sRawV = null, sRawC = null, sVUp = 0, jumpHold = 0;
+// last computed lateral signals, for the replay harness to look at
+let lastDx = 0, lastVLat = 0, lastVUp = 0;
 const swBuf = new Array(5).fill(0); let swIdx = 0;
 let prevCx = 0, laneArmed = true, laneStillSince = 0, laneHold = 0;
+let sVLat = 0;
 let postureStillSince = 0, duckSince = 0, duckPending = 0;
 
 // Landmark x is normalised by frame WIDTH and y by frame HEIGHT, so on a 4:3
@@ -2696,7 +2699,7 @@ async function startPoseMode() {
 
 function startCalibration() {
   calibrated = false; calSamples = [];
-  poseSmoothed = false; sRawV = null; sRawC = null; sVUp = 0; jumpHold = 0; swIdx = 0;
+  poseSmoothed = false; sRawV = null; sRawC = null; sVUp = 0; sVLat = 0; jumpHold = 0; swIdx = 0;
   calSW = 0; calTL = 0;
   jumpArmed = true; laneArmed = true; laneStillSince = 0; laneHold = 0;
   phase = 'calibrating';
@@ -2852,7 +2855,7 @@ function handlePose(result, now) {
   // against it manufactures an enormous velocity and fires a jump the instant
   // you are seen again. Resync and hold the trigger for a moment.
   if (now - lastSeenAt > 250) {
-    sRawV = null; sRawC = null; sVUp = 0; jumpHold = 0;
+    sRawV = null; sRawC = null; sVUp = 0; sVLat = 0; jumpHold = 0;
     jumpArmed = false; laneArmed = false; laneStillSince = 0;
     lastPoseAt = now;
   }
@@ -2978,6 +2981,7 @@ function handlePose(result, now) {
   const baseVY = hipsUsable ? baseHipY : baseShY;
   const rise = baseVY - vy;                            // + = body above baseline
   const dx = sCx - baseCX;                             // already in shoulder-widths
+  lastDx = dx;
 
   const vUpRaw = (prevVY - rawVs) / dt / scale;       // shoulder-widths / second
   prevVY = rawVs;
@@ -3045,7 +3049,17 @@ function handlePose(result, now) {
   // Measured: a vigorous run-in-place bob peaks around 2.1 shoulder-widths/sec
   // and a real hop around 4.2, so the gate sits between them rather than on
   // top of the bob.
-  const tookOff = vUp > 2.9;
+  lastVUp = vUp;
+  // The speed path needs a height condition, and standing up out of a squat is
+  // why. It has every bit as much upward speed as a take-off -- more, from a
+  // deep one -- so on speed alone the game jumped every time you finished a
+  // slide. Measured over a real recording the two never overlap: whenever
+  // upward speed passed the gate, a take-off sat between +0.01 and +0.49
+  // shoulder-widths and a squat recovery between -1.51 and -0.04. They split
+  // at the baseline, and not by luck: a jump *accelerates through* your
+  // standing height, while standing up *decelerates into* it and is already
+  // slowing by the time it gets there.
+  const tookOff = vUp > 2.9 && rise > 0;
   const roseEnough = rise > th.jump && vUp > 0.62;
   // Hold for two frames before firing. A noise-driven crossing lasts one; a
   // real take-off lasts many. Costs 33ms and removes the last of the
@@ -3071,6 +3085,13 @@ function handlePose(result, now) {
   // happens. A decisive step is moving fast well before it gets there, so
   // speed lets it fire at 55% of the distance. Both paths then have to hold
   // for two frames, which a one-frame landmark spike cannot do.
+  lastVLat = vLat;
+  // Raw frame-to-frame lateral speed is far too noisy to ask "has the body
+  // slowed down": inside a single stride it crosses low values on individual
+  // frames. Smoothed, the trough between two real pushes is unambiguous --
+  // measured over a recording, the middle of one stride never fell below 0.72
+  // while a genuine pause reached 0.15.
+  sVLat += (vLat - sVLat) * 0.30;
   const laneFast = Math.abs(vLat) > 2.4 && Math.abs(dx) > th.lane * 0.55;
   if (laneFast || Math.abs(dx) > th.lane) laneHold++; else laneHold = 0;
   if (laneArmed && laneHold >= 2) {
@@ -3088,7 +3109,15 @@ function handlePose(result, now) {
     // swallowed the second step entirely. The hard timeout is the backstop:
     // whatever happens, control comes back.
     if (!laneStillSince) laneStillSince = now;
-    const slowed = vLat < 1.3;
+    // Smoothed, not raw. A real step out measures 1.2 to 1.5 shoulder-widths
+    // -- three to four times the 0.34 threshold -- so the tail of one stride
+    // has enough travel left in it for three more crossings, and everything
+    // depends on the neutral point being reset at the *end* of the stride
+    // rather than somewhere in the middle of it. Raw frame-to-frame speed dips
+    // under any sensible "has it stopped" threshold on individual frames from
+    // noise alone, so it kept declaring the stride over while the body was
+    // still travelling at 1.8.
+    const slowed = sVLat < 0.8;
     if ((slowed && now - laneStillSince > 90) || now - laneStillSince > 520) {
       // Re-arm against the instantaneous position, not the smoothed one: the
       // filter is still converging at this moment, and the rest of that
@@ -3226,6 +3255,7 @@ window.__dbg = {
     rise: hipsUsable ? baseHipY - sHipY : baseShY - sShY,   // shoulder-widths
     drop: hipsUsable ? Math.max(sShY - baseShY, sHipY - baseHipY) : sShY - baseShY,
     poseDuck: g.poseDuck, lastDuckAt, lastJumpAt,
+    vUp: lastVUp, dx: lastDx, vLat: lastVLat, sVLat, laneArmed,
   }),
   setCalibrated: v => { calibrated = v; },
 };
