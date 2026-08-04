@@ -2634,11 +2634,21 @@ async function startPoseMode() {
   phase = 'loading';
   showOverlay(`<div class="big-msg">${T('Loading pose model…')}</div><div class="sub">${T('First load takes ~5–10 s')}</div>`);
   try {
-    const visionMod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm');
+    // 19 MB of model and wasm come from two third-party hosts, and where those
+    // are blocked or throttled the import does not fail -- it hangs, with the
+    // page sitting on "Loading pose model" indefinitely. Fail fast and say
+    // which host did it, so the keyboard offer arrives while the player is
+    // still interested.
+    const withTimeout = (p, ms, what) => Promise.race([p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`Timed out loading ${what}`)), ms))]);
+    const visionMod = await withTimeout(
+      import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm'),
+      20000, 'the pose library (cdn.jsdelivr.net)');
     const { FilesetResolver, PoseLandmarker } = visionMod;
-    const fileset = await FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
-    landmarker = await PoseLandmarker.createFromOptions(fileset, {
+    const fileset = await withTimeout(FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'),
+      30000, 'the runtime (cdn.jsdelivr.net)');
+    landmarker = await withTimeout(PoseLandmarker.createFromOptions(fileset, {
       baseOptions: {
         // `full` rather than `lite`: a few MB more to download and a little
         // more GPU, for noticeably steadier landmarks. The lite model's
@@ -2653,7 +2663,7 @@ async function startPoseMode() {
       minPoseDetectionConfidence: 0.5,
       minPosePresenceConfidence: 0.5,
       minTrackingConfidence: 0.6,
-    });
+    }), 60000, 'the model (storage.googleapis.com)');
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480, facingMode: 'user' }, audio: false,
     });
@@ -2668,7 +2678,7 @@ async function startPoseMode() {
       <div class="big-msg">${T('Camera unavailable')}</div>
       <div class="sub">${err.name === 'NotAllowedError'
         ? T('Camera permission was denied. Allow it and refresh, or play with the keyboard.')
-        : T('Could not load the model or camera (the model loads from a CDN — check your connection). You can still play with the keyboard.')}</div>
+        : `${T('Could not load the model or camera (the model loads from a CDN — check your connection). You can still play with the keyboard.')}<br><span style="opacity:.55">${err.message}</span>`}</div>
       <button class="btn ghost" id="btn-fallback" data-i18n>Use Keyboard Mode</button>`);
     document.getElementById('btn-fallback').onclick = () => { mode = 'keys'; camPanel.style.display = 'none'; setPhase('ready'); };
   }

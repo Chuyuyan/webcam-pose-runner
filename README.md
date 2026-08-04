@@ -181,6 +181,16 @@ exactly the original local-only behaviour.
 
 Only the score is ever transmitted. Pose detection stays on-device regardless.
 
+## Tests
+
+`tests/index.html` — open <http://localhost:5175/tests/> with the dev server running. No build step and no dependencies: it drives the real page in a hidden iframe through `window.__dbg`, the same hook the thresholds were tuned with.
+
+It covers the projection (the camera must sit at the same height on a phone as on a laptop), the pose detector against a synthetic human, the coin route (every coin audited for being inside something solid, plus a bot that follows nothing but the trail and has to take fewer hits than one that ignores it), where the boot spawns, and a full round trip through the recorder below.
+
+**Recordings.** Every threshold in this repo was tuned against a synthetic skeleton, and reality beat that model twice — the run-in-place bob and the torso rotation that reads as a crouch both only showed up once the fake human got closer to a real one. A synthetic model can only contain the mistakes you already thought of. So the recorder captures a real one: in camera mode press **R**, follow the eight prompts (~73 s), and the page saves a `pose-capture.json`. Drop it in `tests/recordings/` and list it in `tests/recordings/index.json`, and the suite replays it forever.
+
+What is stored is four landmarks per frame — the shoulders and hips, the only ones the detector reads — as numbers. No image, no video, nothing that can be turned back into a picture of anybody. A minute is about 60 KB.
+
 ## Debugging
 
 The pose detector can be driven with synthetic landmarks, which is how the thresholds above were tuned without a camera in the loop — `__dbg.handlePose(result, timestampMs)` takes the same shape MediaPipe returns, so you can replay a scripted hop, a slow step backwards, or a sway and count what fires. `__dbg.startCalibration()`, `__dbg.poseTh()` and `__dbg.poseBase()` cover the rest.
