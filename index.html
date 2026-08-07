@@ -2634,8 +2634,15 @@ function poseTh() {
     // The larger of the shoulder and hip drop, so a forward bend at the waist
     // counts too — that is how a lot of people actually duck.
     duck: 0.24,
-    // A decisive lean or a small side step.
-    lane: 0.34,
+    // Set by what has to be *rejected*, not by what has to be detected.
+    // Measured against a real recording: someone asked to stand still and only
+    // turn their shoulders still drifts 0.30 shoulder-widths sideways, while an
+    // actual step out travels 1.2 to 1.5. At 0.34 this sat 12% clear of
+    // ordinary weight-shifting -- the thinnest margin anywhere in the detector,
+    // and the likeliest source of a phantom lane change -- while asking for a
+    // quarter of a real step. 0.42 costs 47 ms on a slow step and nothing on a
+    // brisk one, where the speed path fires first regardless.
+    lane: 0.42,
     center: 0.16,
   };
 }

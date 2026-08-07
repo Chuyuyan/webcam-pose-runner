@@ -460,6 +460,86 @@ async function suiteRecordings() {
   }
 }
 
+// ------------------------------------------------------------------
+// Counting events tells you the detector worked on this recording. It does
+// not tell you by how much — and a gate that a jog clears 88% of is one
+// slightly bouncier person away from firing. So measure how close the
+// segments that must fire *nothing* came to each threshold, and how far
+// past it the segments that must fire actually went.
+// ------------------------------------------------------------------
+const QUIET = ['still', 'jog', 'sway'];   // must never trigger anything
+
+async function suiteMargins() {
+  suite('Margins — how close the quiet segments come to each gate');
+  let list = [];
+  try { list = await (await fetch('recordings/index.json', { cache: 'no-store' })).json(); }
+  catch (e) { /* none */ }
+  if (!list.length) { row('no recordings', 'skip', 'record one first'); return; }
+
+  for (const name of list) {
+    const rec = await (await fetch('recordings/' + name, { cache: 'no-store' })).json();
+    const w = await reload();
+    const d = w.__dbg, g = w.__g;
+    const th = d.poseTh(), SPEED_GATE = 2.9;
+    const by = new Map();
+    for (const f of rec.frames) { if (!by.has(f.s)) by.set(f.s, []); by.get(f.s).push(f); }
+    const toResult = f => {
+      const lm = []; for (let i = 0; i < 33; i++) lm.push({ x: 0.5, y: 0.5, visibility: 0 });
+      [11, 12, 23, 24].forEach((idx, i) => lm[idx] = { x: f.p[i * 3], y: f.p[i * 3 + 1], visibility: f.p[i * 3 + 2] });
+      return { landmarks: [lm] };
+    };
+    d.startCalibration();
+    for (const f of by.get('calibrate') || []) d.handlePose(toResult(f), f.t);
+    d.startPlay();
+
+    const peak = {};
+    for (const [seg, frames] of by) {
+      if (seg === 'calibrate') continue;
+      let prev = frames[0].t;
+      const p = { dx: 0, drop: 0, vUp: 0, rise: 0 };
+      for (const f of frames) {
+        g.obstacles.length = 0; g.pickups.length = 0; g.invuln = 99;
+        d.handlePose(toResult(f), f.t);
+        d.step(1, Math.min(0.05, Math.max(0.001, (f.t - prev) / 1000))); prev = f.t;
+        const s = d.poseSignals();
+        p.dx = Math.max(p.dx, Math.abs(s.dx));
+        p.drop = Math.max(p.drop, s.drop);
+        p.vUp = Math.max(p.vUp, s.vUp);
+        p.rise = Math.max(p.rise, s.rise);
+      }
+      peak[seg] = p;
+    }
+    const worstQuiet = key => Math.max(...QUIET.filter(s => peak[s]).map(s => peak[s][key]));
+
+    // A quiet segment should not get within a quarter of any gate.
+    const gates = [
+      ['lane', 'dx', th.lane], ['crouch', 'drop', th.duck], ['take-off speed', 'vUp', SPEED_GATE],
+    ];
+    for (const [label, key, gate] of gates) {
+      const worst = worstQuiet(key);
+      check(`${name} · standing, jogging or turning stays clear of the ${label} gate`,
+        worst < gate * 0.75,
+        `worst ${worst.toFixed(2)} of ${gate} — ${((1 - worst / gate) * 100).toFixed(0)}% margin (want 25%+)`);
+    }
+    // ...and the real action should clear its gate by a wide margin too.
+    const real = [
+      ['a real step', 'left3', 'dx', th.lane], ['a real crouch', 'crouch3', 'drop', th.duck],
+      ['a real hop', 'jump3', 'vUp', SPEED_GATE],
+    ];
+    for (const [label, seg, key, gate] of real) {
+      if (!peak[seg]) continue;
+      check(`${name} · ${label} clears its gate with room to spare`,
+        peak[seg][key] > gate * 1.5,
+        `${peak[seg][key].toFixed(2)} vs ${gate} — ${(peak[seg][key] / gate).toFixed(1)}x`);
+    }
+    // The height condition that separates a hop from standing up out of a squat.
+    if (peak.crouch3 && peak.jump3)
+      check(`${name} · a hop rises further above the baseline than a squat recovery`,
+        peak.jump3.rise > peak.crouch3.rise * 2,
+        `hop +${peak.jump3.rise.toFixed(2)} vs recovery +${peak.crouch3.rise.toFixed(2)}`);
+  }
+}
+
 async function run(only) {
   document.getElementById('run').disabled = true;
   out.innerHTML = '';
@@ -480,6 +560,7 @@ async function run(only) {
       await suiteRecorder();
     }
     await suiteRecordings();
+    await suiteMargins();
   } catch (e) {
     row('suite crashed', 'fail', e && e.stack ? e.stack.split('\n')[0] : String(e));
   }

@@ -203,6 +203,20 @@ Eight prompts, about 73 seconds. The page saves a `pose-capture.json` to your do
 
 What is stored is four landmarks per frame — the shoulders and hips, the only ones the detector reads — as numbers. No image, no video, nothing that can be turned back into a picture of anybody. A minute is about 60 KB.
 
+### Margins, not just counts
+
+Counting events tells you the detector worked on one recording. It does not tell you by how much, and a gate that a jog already clears 88% of is one slightly bouncier person away from firing. So the suite also measures how close the segments that must fire *nothing* came to each gate, and how far past it the segments that must fire actually went:
+
+| gate | worst quiet approach | real action | margin |
+|---|---|---|---|
+| lane, 0.42 | turning in place, 0.30 | a step, 0.89 | 29% |
+| crouch, 0.24 | turning in place, 0.18 | a crouch, 1.75 | 26% |
+| take-off speed, 2.9 | jogging on the spot, 2.14 | a hop, 24.3 | 26% |
+
+The lane gate is what this analysis changed. It is set by what has to be *rejected*, not by what has to be detected: someone asked to stand still and only turn their shoulders still drifts 0.30 shoulder-widths sideways, while an actual step travels 1.2 to 1.5. At the old 0.34 it sat 12% clear of ordinary weight-shifting while asking for a quarter of a real step — the thinnest margin anywhere in the detector, and the likeliest source of a phantom lane change. 0.42 costs 47 ms on a slow step and nothing on a brisk one, where the speed path fires first regardless.
+
+One thing this ruled out along the way: the phantom drift is *not* a rotation artefact. Turning foreshortens the shoulders by up to 60%, so weighting the body centre toward the hips looked like an obvious fix — but measured, the hip centre moves 0.25 during a turn against the shoulder centre's 0.27. There was nothing to win there, and the fix had to come from the threshold instead.
+
 ## Debugging
 
 The pose detector can be driven with synthetic landmarks, which is how the thresholds above were tuned without a camera in the loop — `__dbg.handlePose(result, timestampMs)` takes the same shape MediaPipe returns, so you can replay a scripted hop, a slow step backwards, or a sway and count what fires. `__dbg.startCalibration()`, `__dbg.poseTh()` and `__dbg.poseBase()` cover the rest.
