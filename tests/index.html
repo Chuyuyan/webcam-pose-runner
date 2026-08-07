@@ -751,6 +751,144 @@ async function suiteSweep() {
     'segments exist to settle them with real data.');
 }
 
+// ------------------------------------------------------------------
+// What happens when the camera stops cooperating. Every one of these is
+// something a real session does: someone walks out of shot, a tab is
+// backgrounded, the model briefly locks onto someone else walking past,
+// a long skirt hides the hips for the whole run.
+//
+// Built on the recording rather than on synthetic frames, because the
+// interesting part is what the detector does on the way back in, and that
+// depends on what it was holding when the pose went.
+// ------------------------------------------------------------------
+async function suiteRobustness() {
+  suite('Robustness — when the camera stops cooperating');
+  let list = [];
+  try { list = await (await fetch('recordings/index.json', { cache: 'no-store' })).json(); }
+  catch (e) { /* none */ }
+  if (!list.length) { row('no recordings', 'skip', 'record one first'); return; }
+  const rec = await (await fetch('recordings/' + list[0], { cache: 'no-store' })).json();
+  const by = new Map();
+  for (const f of rec.frames) { if (!by.has(f.s)) by.set(f.s, []); by.get(f.s).push(f); }
+  const toResult = (f, vis) => {
+    const lm = []; for (let i = 0; i < 33; i++) lm.push({ x: 0.5, y: 0.5, visibility: 0 });
+    [11, 12, 23, 24].forEach((idx, i) => lm[idx] = {
+      x: f.p[i * 3] + (f.dx || 0), y: f.p[i * 3 + 1],
+      visibility: vis ? vis[i > 1 ? 'hip' : 'shoulder'] : f.p[i * 3 + 2],
+    });
+    return { landmarks: [lm] };
+  };
+
+  // Run a scripted session and count everything the detector decided.
+  async function session(steps) {
+    const w = await reload();
+    const d = w.__dbg, g = w.__g;
+    d.startCalibration();
+    for (const f of by.get('calibrate')) d.handlePose(toResult(f), f.t);
+    d.startPlay();
+    let t = by.get('calibrate').slice(-1)[0].t;
+    const counts = {};
+    for (const st of steps) {
+      let jumps = 0, air = !g.grounded, crouches = 0, ducking = g.poseDuck, lanes = 0, lane = g.lane;
+      for (const ev of st.frames) {
+        g.obstacles.length = 0; g.pickups.length = 0; g.invuln = 99;
+        t += ev.gap ?? 16;
+        if (!ev.blank) d.handlePose(toResult(ev.f, ev.vis), t);
+        else d.handlePose(null, t);
+        d.step(1, Math.min(0.05, (ev.gap ?? 16) / 1000));
+        if (!g.grounded && !air) jumps++; air = !g.grounded;
+        if (g.poseDuck && !ducking) crouches++; ducking = g.poseDuck;
+        if (g.lane !== lane) { lanes++; lane = g.lane; }
+      }
+      counts[st.name] = { jumps, crouches, lanes, finite: Number.isFinite(g.dist) && Number.isFinite(g.y) };
+    }
+    return counts;
+  }
+
+  const still = by.get('still'), steps3 = by.get('left3'), crouch = by.get('crouch3');
+  const blanks = n => Array.from({ length: n }, () => ({ blank: true }));
+  const plain = frames => frames.map(f => ({ f }));
+
+  // 1. Walk out of shot and come back, at three lengths.
+  for (const [label, n] of [['half a second', 30], ['three seconds', 180], ['fifteen seconds', 900]]) {
+    const r = await session([
+      { name: 'gone', frames: blanks(n) },
+      { name: 'back', frames: plain(still.slice(0, 120)) },
+    ]);
+    check(`nothing fires on the way back from ${label} out of shot`,
+      r.back.jumps === 0 && r.back.crouches === 0 && r.back.lanes === 0 && r.back.finite,
+      `${r.back.jumps} jumps, ${r.back.crouches} crouches, ${r.back.lanes} lane changes`);
+  }
+
+  // 2. The pose is lost *while crouching* — the case the code singles out.
+  {
+    const r = await session([
+      { name: 'crouching', frames: plain(crouch.slice(0, 90)) },
+      { name: 'lost', frames: blanks(180) },
+      { name: 'back', frames: plain(still.slice(0, 120)) },
+    ]);
+    check('a slide does not survive losing the pose for three seconds',
+      r.back.jumps === 0 && r.back.lanes === 0,
+      `${r.back.jumps} jumps, ${r.back.lanes} lane changes after`);
+  }
+
+  // 3. A backgrounded tab: valid frames, but five seconds of clock missing.
+  {
+    const r = await session([
+      { name: 'before', frames: plain(still.slice(0, 60)) },
+      { name: 'gap', frames: [{ f: still[60], gap: 5000 }, ...plain(still.slice(61, 180))] },
+    ]);
+    check('a five second clock gap with the body still fires nothing',
+      r.gap.jumps === 0 && r.gap.crouches === 0 && r.gap.lanes === 0 && r.gap.finite,
+      `${r.gap.jumps} jumps, ${r.gap.crouches} crouches, ${r.gap.lanes} lane changes`);
+  }
+
+  // 4. The model briefly locks onto someone else: an instant two-shoulder-width
+  //    jump sideways and back.
+  {
+    const jump = still.slice(0, 120).map((f, i) => ({ f: { ...f, dx: i >= 40 && i < 70 ? 0.28 : 0 } }));
+    const r = await session([{ name: 'teleport', frames: jump }]);
+    check('a teleporting detection costs at most one lane each way',
+      r.teleport.lanes <= 2 && r.teleport.jumps === 0 && r.teleport.finite,
+      `${r.teleport.lanes} lane changes, ${r.teleport.jumps} jumps`);
+  }
+
+  // 5. Hips hidden for the whole session — the long skirt case, which used to
+  //    reject every frame and leave the player with a game that did nothing.
+  {
+    const vis = { shoulder: 0.95, hip: 0.1 };
+    const w = await reload();
+    const d = w.__dbg, g = w.__g;
+    d.startCalibration();
+    for (const f of by.get('calibrate')) d.handlePose(toResult(f, vis), f.t);
+    const calibrated = d.poseBase().calibrated;
+    d.startPlay();
+    const count = frames => {
+      let jumps = 0, air = !g.grounded, crouches = 0, ducking = g.poseDuck, lanes = 0, lane = g.lane, prev = frames[0].t;
+      for (const f of frames) {
+        g.obstacles.length = 0; g.pickups.length = 0; g.invuln = 99;
+        d.handlePose(toResult(f, vis), f.t);
+        d.step(1, Math.min(0.05, Math.max(0.001, (f.t - prev) / 1000))); prev = f.t;
+        if (!g.grounded && !air) jumps++; air = !g.grounded;
+        if (g.poseDuck && !ducking) crouches++; ducking = g.poseDuck;
+        if (g.lane !== lane) { lanes++; lane = g.lane; }
+      }
+      return { jumps, crouches, lanes };
+    };
+    check('calibrates with the hips hidden', calibrated, calibrated ? '' : 'never calibrated');
+    const q = count(by.get('still'));
+    check('hips hidden — standing still still fires nothing',
+      q.jumps === 0 && q.crouches === 0 && q.lanes === 0,
+      `${q.jumps} jumps, ${q.crouches} crouches, ${q.lanes} lane changes`);
+    const j = count(by.get('jump3'));
+    check('hips hidden — jumps still register', j.jumps >= 2, `${j.jumps} of 3`);
+    const c = count(by.get('crouch3'));
+    check('hips hidden — crouches still register', c.crouches >= 2, `${c.crouches} of 3`);
+    const l = count(by.get('left3'));
+    check('hips hidden — steps still register one lane each', l.lanes === 6, `${l.lanes} of 6`);
+  }
+}
+
 async function run(only) {
   document.getElementById('run').disabled = true;
   out.innerHTML = '';
@@ -773,6 +911,7 @@ async function run(only) {
     await suiteRecordings();
     await suiteMargins();
     if (!only) await suiteSweep();
+    await suiteRobustness();
   } catch (e) {
     row('suite crashed', 'fail', e && e.stack ? e.stack.split('\n')[0] : String(e));
   }

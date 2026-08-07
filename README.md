@@ -229,6 +229,14 @@ The last two are marked indicative, not settled. The model's take-off velocity p
 
 The sweep also found a real bug: calibration counted 50 frames rather than elapsed time, so the "hold it for 2 seconds" the screen promises meant 0.8 s on a 60 fps camera — too short to average a wobble out of — and 3.3 s on a 15 fps one. It now wants both.
 
+### When the camera stops cooperating
+
+Every one of these is something a real session does, and all of them are now replayed against the recording rather than reasoned about: walking out of shot for half a second, three seconds and fifteen seconds; losing the pose *while crouching*, which is the case a desk-height webcam loses most often and the one where accusing someone of wandering off is most wrong; a backgrounded tab handing back a five-second clock gap with the body still; the model briefly locking onto someone walking past, which teleports the landmarks a shoulder-width sideways and back.
+
+Coming back from a dropout is the interesting part. The previous sample is stale, and differentiating against it manufactures an enormous velocity — enough to fire a jump the instant you are seen again. The detector resyncs and disarms its triggers for a moment instead; the tests hold it to firing nothing at all on the way back in.
+
+The long-skirt case is checked end to end too, since hidden hips used to reject every frame and leave those players with a game that did nothing: with hip visibility at 0.1 for the whole session it still calibrates, and still reads 3 of 3 jumps, 3 of 3 crouches and 6 of 6 steps.
+
 ## Debugging
 
 The pose detector can be driven with synthetic landmarks, which is how the thresholds above were tuned without a camera in the loop — `__dbg.handlePose(result, timestampMs)` takes the same shape MediaPipe returns, so you can replay a scripted hop, a slow step backwards, or a sway and count what fires. `__dbg.startCalibration()`, `__dbg.poseTh()` and `__dbg.poseBase()` cover the rest.
