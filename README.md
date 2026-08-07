@@ -217,6 +217,18 @@ The lane gate is what this analysis changed. It is set by what has to be *reject
 
 One thing this ruled out along the way: the phantom drift is *not* a rotation artefact. Turning foreshortens the shoulders by up to 60%, so weighting the body centre toward the hips looked like an obvious fix — but measured, the hip centre moves 0.25 during a turn against the shoulder centre's 0.27. There was nothing to win there, and the fix had to come from the threshold instead.
 
+### The synthetic human, rebuilt from the recording
+
+The first version of the synthetic human was invented, and every number in it was wrong by two to four times: it stepped 0.30 shoulder-widths where a real person steps 1.2 to 1.5, hopped 0.24 where a real hop is 0.50, crouched 0.38 where a real crouch is 1.4 to 1.85, and put ten times too much noise on the shoulders while treating the hips — which are actually eight times noisier — as identical. That is why it passed everything the day the real recording failed three of its seven segments.
+
+Rebuilt to the recording's measurements it can be swept, because the recording is one person at one distance on one day and the sweep asks what happens to everyone else. It holds across 1.0–1.7× the recorded distance, steps of 0.55–2.0 shoulder-widths, hops of 0.38–0.80, crouches of 0.6–2.1, builds from 1.15 to 1.80 torso-to-shoulder, camera frame rates of 15–48 fps, and up to 8× the measured landmark noise.
+
+Where it stops working is recorded rather than hidden, because a sweep that only reports success never tells you where the cliff is: closer than 0.85× and the framing check will not calibrate; a hop of 0.30 falls between the height gate and the speed gate; a jog vigorous enough to bob 0.35 is taller than a small hop; a sideways drift of 0.55 is a lane-sized movement and is read as one.
+
+The last two are marked indicative, not settled. The model's take-off velocity peaks around 4.5 shoulder-widths per second where a real one spikes to 24 — a real landmark jumps between frames at push-off and a smooth parabola does not — so it is exactly the wrong instrument for deciding a speed threshold. The `jogHard` and `hopSmall` capture segments exist to settle them with real data instead. The sweep is seeded, so it gives the same answer twice.
+
+The sweep also found a real bug: calibration counted 50 frames rather than elapsed time, so the "hold it for 2 seconds" the screen promises meant 0.8 s on a 60 fps camera — too short to average a wobble out of — and 3.3 s on a 15 fps one. It now wants both.
+
 ## Debugging
 
 The pose detector can be driven with synthetic landmarks, which is how the thresholds above were tuned without a camera in the loop — `__dbg.handlePose(result, timestampMs)` takes the same shape MediaPipe returns, so you can replay a scripted hop, a slow step backwards, or a sway and count what fires. `__dbg.startCalibration()`, `__dbg.poseTh()` and `__dbg.poseBase()` cover the rest.

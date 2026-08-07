@@ -376,10 +376,21 @@ async function suiteRecorder() {
       // A big turn with only the small drift a planted human cannot avoid.
       case 'sway': { const ph = Math.sin(t * 1.4);
         return { cx: 0.035 * ph, yaw: (40 * Math.PI / 180) * ph }; }
+      case 'jogHard': return { sink: 0.05 * Math.abs(Math.sin(t * 11)) };
       case 'jump3': {
         for (const at of [1.5, 4.5, 7.5]) {
           const u = (t - at) / 0.4;                     // a 0.4s hop
           if (u >= 0 && u <= 1) return { sink: -0.24 * Math.sin(u * Math.PI) };
+        }
+        return {};
+      }
+      // Half the height of the one above -- small, but still inside the range
+      // the sweep says is supported. This suite is about whether the recorder
+      // writes a file the replay can read, not about where detection gives up.
+      case 'hopSmall': {
+        for (const at of [1.5, 4.2, 6.9]) {
+          const u = (t - at) / 0.4;
+          if (u >= 0 && u <= 1) return { sink: -0.13 * Math.sin(u * Math.PI) };
         }
         return {};
       }
@@ -540,6 +551,206 @@ async function suiteMargins() {
   }
 }
 
+// ------------------------------------------------------------------
+// A synthetic human built from measurements rather than guesses.
+//
+// The first version of this model was invented, and every number in it was
+// wrong by two to four times: it stepped 0.30 shoulder-widths where a real
+// person steps 1.2 to 1.5, hopped 0.24 where a real hop is 0.50, crouched
+// 0.38 where a real crouch is 1.4 to 1.85, and put ten times too much noise
+// on the shoulders while treating the hips — which are actually eight times
+// noisier — as identical. That is why it passed everything while the real
+// recording failed three of seven segments.
+//
+// Rebuilt to the recording's numbers, it can be swept: the recording is one
+// person at one distance on one day, and the sweep asks what happens to
+// everyone else.
+// ------------------------------------------------------------------
+const REAL = {
+  shoulder: 0.318,      // apparent shoulder width, height-normalised units
+  torsoRatio: 1.46,     // shoulder-to-hip distance, in shoulder-widths
+  noiseShoulder: 0.0004,
+  noiseHip: 0.0030,
+  step: 1.30,           // shoulder-widths of lateral travel
+  jump: 0.50,           // shoulder-widths the shoulder line rises
+  jumpMs: 380,
+  crouch: 1.70,         // shoulder-widths the shoulder line drops
+  crouchMs: 1450,
+  jogBob: 0.15,
+  swayLateral: 0.27,
+  swayYawDeg: 66,       // foreshortens the shoulders to 40% at the extremes
+};
+
+// Seeded, so a sweep gives the same answer twice. With Math.random the noise
+// axis flipped between 3 and 4 crouches at the top end from one run to the
+// next, which is not a test result, it is a coin.
+let rnd = mulberry32(1);
+function mulberry32(a) {
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function synthFrame(p, m) {
+  const asp = 4 / 3;
+  const S = p.shoulder / p.dist;                      // apparent, height units
+  const gauss = () => (rnd() + rnd() + rnd() + rnd() - 2) * 0.7;   // ~unit normal
+  const ns = () => gauss() * p.noiseShoulder * p.noiseScale;
+  const nh = () => gauss() * p.noiseHip * p.noiseScale;
+  const shY = 0.5 - 0.30 + m.sink * S;
+  const hipY = shY + p.torsoRatio * S;
+  const X = 0.5 - (m.cx * S) / asp;
+  const half = (S * Math.cos(m.yaw || 0)) / 2 / asp;
+  const tilt = Math.sin(m.yaw || 0) * 0.012 / p.dist;
+  const lm = []; for (let i = 0; i < 33; i++) lm.push({ x: 0.5, y: 0.5, visibility: 1 });
+  lm[11] = { x: X - half + ns(), y: shY - tilt + ns(), visibility: 1 };
+  lm[12] = { x: X + half + ns(), y: shY + tilt + ns(), visibility: 1 };
+  lm[23] = { x: X - half * 0.8 + nh(), y: hipY + nh(), visibility: 1 };
+  lm[24] = { x: X + half * 0.8 + nh(), y: hipY + nh(), visibility: 1 };
+  return { landmarks: [lm] };
+}
+
+// Motion in shoulder-widths, shaped like the recording's profiles.
+function motionAt(kind, t, p) {
+  switch (kind) {
+    case 'still': return { sink: 0, cx: 0 };
+    case 'jog':   return { sink: -p.jogBob * Math.abs(Math.sin(t * 2.5 * Math.PI)), cx: 0 };
+    case 'sway': {
+      const ph = Math.sin(t * 0.7 * 2 * Math.PI);
+      return { sink: 0, cx: p.swayLateral * ph, yaw: (p.swayYawDeg * Math.PI / 180) * ph };
+    }
+    case 'jump': {
+      const period = 1.6, u = (t % period) / period, T = p.jumpMs / 1000 / period;
+      if (u < 0.10) return { sink: p.jump * 0.34 * (u / 0.10), cx: 0 };   // the load
+      if (u < 0.10 + T) { const v = (u - 0.10) / T; return { sink: -p.jump * 4 * v * (1 - v), cx: 0 }; }
+      return { sink: 0, cx: 0 };
+    }
+    case 'crouch': {
+      const period = 2.6, u = (t % period) * 1000, T = p.crouchMs;
+      if (u < 300) return { sink: p.crouch * (u / 300), cx: 0 };
+      if (u < T - 350) return { sink: p.crouch, cx: 0 };
+      if (u < T) return { sink: p.crouch * (1 - (u - (T - 350)) / 350), cx: 0 };
+      return { sink: 0, cx: 0 };
+    }
+    case 'step': {
+      const period = 2.6, u = (t % period) * 1000;
+      const ease = x => x * x * (3 - 2 * x);
+      if (u < 400) return { sink: 0, cx: -p.step * ease(u / 400) };
+      if (u < 1600) return { sink: 0, cx: -p.step };
+      if (u < 2000) return { sink: 0, cx: -p.step * (1 - ease((u - 1600) / 400)) };
+      return { sink: 0, cx: 0 };
+    }
+  }
+}
+
+// One clock for every body in a sweep. Restarting it at zero for each one
+// sends the detector's timestamps backwards, which makes every velocity it
+// derives negative -- the first body passed and the second reported nothing
+// at all, which is a bug in the harness and not in the game.
+let synthClock = 0;
+
+// One full session for one body. Returns what the detector decided.
+function runBody(w, p) {
+  rnd = mulberry32(20260804);
+  const d = w.__dbg, g = w.__g;
+  const dt = 1000 / p.fps;
+  let t = (synthClock += 2000);
+  const feed = (kind, tt) => { d.handlePose(synthFrame(p, motionAt(kind, tt, p)), t); t += dt; };
+  // Calibration wants both a sample count and a duration, so feed generously
+  // and then check it actually took -- an uncalibrated detector reports zero
+  // for everything, which reads like a catastrophic failure when it is really
+  // "the person never got framed".
+  d.startCalibration();
+  for (let i = 0; i < 200 && !d.poseBase().calibrated; i++)
+    d.handlePose(synthFrame({ ...p, noiseScale: p.noiseScale * 0.4 }, { sink: 0, cx: 0 }), (t += dt));
+  if (!d.poseBase().calibrated) { synthClock = t; return { uncalibrated: true }; }
+  d.startPlay();
+
+  const out = {};
+  const phases = [['still', 3], ['jog', 3], ['sway', 4], ['jump', 4.8], ['crouch', 7.8], ['step', 7.8]];
+  for (const [kind, secs] of phases) {
+    synthClock = t;
+    let jumps = 0, air = !g.grounded, crouches = 0, ducking = g.poseDuck, lanes = 0, lane = g.lane;
+    for (let tt = 0; tt < secs; tt += dt / 1000) {
+      g.obstacles.length = 0; g.pickups.length = 0; g.invuln = 99;
+      feed(kind, tt);
+      d.step(1, dt / 1000);
+      if (!g.grounded && !air) jumps++; air = !g.grounded;
+      if (g.poseDuck && !ducking) crouches++; ducking = g.poseDuck;
+      if (g.lane !== lane) { lanes++; lane = g.lane; }
+    }
+    out[kind] = { jumps, crouches, lanes };
+  }
+  return out;
+}
+
+// 3 jumps, 3 crouches, 3 steps (out and back is 6 lane changes), nothing else.
+function bodyVerdict(r) {
+  if (r.uncalibrated) return ['never calibrated'];
+  const bad = [];
+  for (const q of ['still', 'jog', 'sway'])
+    if (r[q].jumps || r[q].crouches || r[q].lanes)
+      bad.push(`${q}:${r[q].jumps}j/${r[q].crouches}c/${r[q].lanes}L`);
+  if (r.jump.jumps !== 3) bad.push(`jumps ${r.jump.jumps}/3`);
+  if (r.crouch.crouches !== 3) bad.push(`crouches ${r.crouch.crouches}/3`);
+  if (r.step.lanes !== 6) bad.push(`lanes ${r.step.lanes}/6`);
+  return bad;
+}
+
+async function suiteSweep() {
+  const w = await reload();
+  suite('Sweep — the same session, for bodies other than the one recorded');
+  const base = { ...REAL, dist: 1, noiseScale: 1, fps: 60 };
+
+  const baseBad = bodyVerdict(runBody(w, base));
+  check('the body the recording came from', baseBad.length === 0,
+    baseBad.join(', ') || 'all correct');
+
+  // The ranges the detector is expected to hold across. Anything outside them
+  // is listed below as a known edge rather than pretended away.
+  const axes = [
+    ['distance from the camera', 'dist', [1.0, 1.15, 1.4, 1.7]],
+    ['how far they step', 'step', [0.55, 0.75, 1.0, 1.6, 2.0]],
+    ['how high they hop', 'jump', [0.38, 0.44, 0.62, 0.80]],
+    ['how deep they crouch', 'crouch', [0.6, 0.9, 1.3, 2.1]],
+    ['build (torso against shoulders)', 'torsoRatio', [1.15, 1.30, 1.60, 1.80]],
+    ['camera frame rate', 'fps', [15, 24, 30, 48]],
+    ['landmark noise', 'noiseScale', [2, 4, 8]],
+    ['how much they bob while jogging', 'jogBob', [0.15, 0.25]],
+    ['how much they drift while turning', 'swayLateral', [0.20, 0.40]],
+  ];
+  for (const [label, key, values] of axes) {
+    const fails = [];
+    for (const v of values) {
+      const bad = bodyVerdict(runBody(w, { ...base, [key]: v }));
+      if (bad.length) fails.push(`${key}=${v} → ${bad.join(' ')}`);
+    }
+    check(label, fails.length === 0,
+      fails.length ? fails.join('; ') : `holds across ${values.join(', ')}`);
+  }
+
+  // Where it stops working. These are recorded, not asserted: a sweep that
+  // only ever reports success is not telling you where the cliff is.
+  const edges = [
+    ['dist', 0.85, 'closer than this and the framing check will not calibrate'],
+    ['jump', 0.30, 'a hop this small falls between the height gate and the speed gate'],
+    ['jogBob', 0.35, 'a jog this vigorous is taller than a small hop'],
+    ['swayLateral', 0.55, 'a drift this large is a lane-sized movement'],
+  ];
+  for (const [key, v, why] of edges) {
+    const bad = bodyVerdict(runBody(w, { ...base, [key]: v }));
+    row(`edge: ${key} = ${v}`, 'skip', `${bad.join(' ') || 'still fine'} — ${why}`);
+  }
+  row('caveat', 'skip',
+    'The model take-off peaks around 4.5 shoulder-widths/sec where a real one spikes to 24 — ' +
+    'a real landmark jumps between frames at push-off and a smooth parabola does not. ' +
+    'The jog-versus-small-hop edges above are indicative; the jogHard and hopSmall capture ' +
+    'segments exist to settle them with real data.');
+}
+
 async function run(only) {
   document.getElementById('run').disabled = true;
   out.innerHTML = '';
@@ -561,6 +772,7 @@ async function run(only) {
     }
     await suiteRecordings();
     await suiteMargins();
+    if (!only) await suiteSweep();
   } catch (e) {
     row('suite crashed', 'fail', e && e.stack ? e.stack.split('\n')[0] : String(e));
   }

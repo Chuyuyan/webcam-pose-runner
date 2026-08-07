@@ -2576,7 +2576,8 @@ let calHipY = 0, calShY = 0, calCX = 0, calSW = 0, calTL = 0;
 // long skirt or dress is the common case. Shoulders stay dependable, so the
 // detector degrades to an upper-body-only mode instead of going dead.
 let hipsUsable = true;
-let calSamples = [];
+let calSamples = [], calStartedAt = 0;
+const CAL_MS = 1800;
 let lastJumpAt = 0, lastSeenAt = 0;
 // smoothed landmark signals + jump state machine
 let sHipY = 0, sShY = 0, sCx = 0, sTorso = 0.25, poseSmoothed = false;
@@ -2743,8 +2744,17 @@ const CAPTURE_SCRIPT = [
   // shoulder width is the denominator of every signal -- must fire nothing.
   { id: 'sway', prompt: 'Turn your shoulders left and right. Feet planted, hips still — turn, do not lean',
     secs: 8, expect: { jumps: 0, crouches: 0, laneChanges: 0 } },
+  // Two segments that exist because a sweep of the synthetic human put the
+  // vigorous end of a jog and the small end of a hop on top of each other,
+  // and the model cannot settle it: its take-off velocity peaks around 4.5
+  // where a real one spikes to 24, because a real landmark jumps between
+  // frames at the moment of push-off and a smooth parabola does not.
+  { id: 'jogHard', prompt: 'Jog on the spot again — but properly, knees up',
+    secs: 7, expect: { jumps: 0, crouches: 0, laneChanges: 0 } },
   { id: 'jump3', prompt: 'Jump in place. THREE times, with a pause between',
     secs: 10, expect: { jumps: 3, crouches: 0 } },
+  { id: 'hopSmall', prompt: 'Now THREE small hops — barely leave the ground',
+    secs: 9, expect: { jumps: 3, crouches: 0 } },
   { id: 'crouch3', prompt: 'Crouch down and stand back up. THREE times, holding each for about a second',
     secs: 12, expect: { crouches: 3, jumps: 0 } },
   { id: 'left3', prompt: 'Step LEFT, then back to the middle. THREE times',
@@ -2954,9 +2964,16 @@ function handlePose(result, now) {
       camStatus.textContent = fr.hint;
       return;
     }
+    if (!calSamples.length) calStartedAt = now;
     calSamples.push({ cx, hipY: hipN, shoulderY: shoulderN, torso: sw, swRaw, tlRaw });
-    camStatus.textContent = `${T('Hold still…')} ${Math.min(100, Math.round(calSamples.length / 50 * 100))}%`;
-    if (calSamples.length >= 50) {
+    // Both a duration and a sample count. Counting frames alone made the
+    // advertised "hold it for 2 seconds" mean 0.8 s on a 60 fps camera -- too
+    // short to average a wobble out of -- and 3.3 s on a 15 fps one, which
+    // just looks broken. Counting time alone would accept a handful of frames
+    // from a slow camera as a baseline.
+    const held = now - calStartedAt, want = Math.max(held / CAL_MS, calSamples.length / 50);
+    camStatus.textContent = `${T('Hold still…')} ${Math.min(100, Math.round(want * 100))}%`;
+    if (calSamples.length >= 50 && held >= CAL_MS) {
       baseCX = avg(calSamples.map(s => s.cx));
       baseHipY = avg(calSamples.map(s => s.hipY));
       baseShY = avg(calSamples.map(s => s.shoulderY));

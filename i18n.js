@@ -40,6 +40,8 @@
     'Turn your shoulders left and right. Feet planted, hips still — turn, do not lean':
       '左右转动肩膀。脚不要动、胯不要动——是转身，不是侧倾',
     'Jump in place. THREE times, with a pause between': '原地跳跃，跳三次，每次之间停顿一下',
+    'Jog on the spot again — but properly, knees up': '再原地跑一次——这次用力一点，膝盖抬起来',
+    'Now THREE small hops — barely leave the ground': '现在做三次小跳——脚刚离地就行',
     'Crouch down and stand back up. THREE times, holding each for about a second':
       '蹲下再站起来，做三次，每次蹲住约一秒',
     'Step LEFT, then back to the middle. THREE times': '向左跨一步，再回到中间。做三次',
